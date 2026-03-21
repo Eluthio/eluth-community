@@ -132,16 +132,13 @@ if (($_POST['act'] ?? '') === 'install_plugin') {
 if (($_POST['act'] ?? '') === 'uninstall_plugin') {
     $slug = preg_replace('/[^a-z0-9_-]/', '', $_POST['slug'] ?? '');
     if ($slug) {
-        $officials = array_keys(officialPlugins());
-        if (!in_array($slug, $officials)) {
-            try {
-                $db = getDB();
-                $db->prepare("DELETE FROM plugins WHERE slug=?")->execute([$slug]);
-                $db->prepare("DELETE FROM server_settings WHERE `key` LIKE ?")->execute(['plugin_' . $slug . '_%']);
-                $dir = BASE . '/storage/app/public/plugins/' . $slug;
-                if (is_dir($dir)) rmdirRecursive($dir);
-            } catch (\Throwable $e) {}
-        }
+        try {
+            $db = getDB();
+            $db->prepare("DELETE FROM plugins WHERE slug=?")->execute([$slug]);
+            $db->prepare("DELETE FROM server_settings WHERE `key` LIKE ?")->execute(['plugin_' . $slug . '_%']);
+            $dir = BASE . '/storage/app/public/plugins/' . $slug;
+            if (is_dir($dir)) rmdirRecursive($dir);
+        } catch (\Throwable $e) {}
     }
     header('Location: ?step=plugins&msg=' . urlencode('Plugin removed.'));
     exit;
@@ -1038,30 +1035,65 @@ function installPluginFromUrl(string $url): ?string
 
 function pagePlugins(): void
 {
+    global $cfg;
+    $msg = $_GET['msg'] ?? null;
+    $err = $_GET['err'] ?? null;
+
+    // Fetch installed plugins from local DB
     try {
-        seedOfficialPlugins();
-        $db      = getDB();
-        $plugins = $db->query("SELECT * FROM plugins ORDER BY tier='official' DESC, name")->fetchAll();
+        $db        = getDB();
+        $installed = $db->query("SELECT * FROM plugins ORDER BY name")->fetchAll();
+        $installedSlugs = array_column((array)$installed, 'slug');
     } catch (\Throwable $e) {
         echo '<div class="alert alert--error">Database error: ' . htmlspecialchars($e->getMessage()) . '</div>';
         return;
     }
-    $msg = $_GET['msg'] ?? null;
-    $err = $_GET['err'] ?? null;
+
+    // Fetch catalogue from central
+    $catalogue   = [];
+    $catalogueErr = null;
+    $centralUrl  = rtrim($cfg['CENTRAL_SERVER_URL'] ?? '', '/');
+    if ($centralUrl) {
+        $ch = curl_init($centralUrl . '/api/plugins/catalogue');
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 6,
+            CURLOPT_USERAGENT      => 'EluthBackend/1.0',
+            CURLOPT_HTTPHEADER     => ['Accept: application/json'],
+        ]);
+        $body   = curl_exec($ch);
+        $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($status === 200 && $body) {
+            $data      = json_decode($body, true);
+            $catalogue = $data['plugins'] ?? [];
+        } else {
+            $catalogueErr = 'Could not reach the Eluth plugin store.';
+        }
+    } else {
+        $catalogueErr = 'CENTRAL_SERVER_URL not set in .env.';
+    }
+
+    // Split catalogue into available (not installed) and show recommended first
+    $available = array_filter($catalogue, fn($p) => !in_array($p['slug'], $installedSlugs));
+    usort($available, fn($a, $b) => ($b['recommended'] <=> $a['recommended']) ?: strcmp($a['name'], $b['name']));
     ?>
     <div class="page-title">Plugin Manager</div>
-    <p class="body-text">Enable or disable plugins for this server. Official plugins are built into the Eluth platform; third-party plugins can be installed below.</p>
 
     <?php if ($msg): ?><div class="alert alert--info"><?= htmlspecialchars($msg) ?></div><?php endif; ?>
     <?php if ($err): ?><div class="alert alert--error"><?= htmlspecialchars($err) ?></div><?php endif; ?>
 
-    <?php foreach ($plugins as $plugin):
+    <!-- ── Installed plugins ─────────────────────────────────────────────── -->
+    <div class="section-title">Installed</div>
+
+    <?php if (empty($installed)): ?>
+        <div class="empty">No plugins installed yet. Browse the store below.</div>
+    <?php else: foreach ($installed as $plugin):
         $manifest   = json_decode($plugin->manifest ?? '{}', true) ?? [];
         $settings   = $manifest['settings'] ?? [];
         $isEnabled  = (bool) $plugin->is_enabled;
         $isOfficial = $plugin->tier === 'official';
 
-        // Fetch current setting values
         $settingValues = [];
         if ($settings) {
             $stmt = $db->prepare("SELECT `key`, `value` FROM server_settings WHERE `key` LIKE ?");
@@ -1098,13 +1130,11 @@ function pagePlugins(): void
                         <button class="btn btn--primary btn--sm">Enable</button>
                     </form>
                 <?php endif; ?>
-                <?php if (!$isOfficial): ?>
-                    <form method="POST" style="margin:0" onsubmit="return confirm('Uninstall <?= htmlspecialchars(addslashes($plugin->name)) ?>?')">
-                        <input type="hidden" name="act" value="uninstall_plugin">
-                        <input type="hidden" name="slug" value="<?= htmlspecialchars($plugin->slug) ?>">
-                        <button class="btn btn--danger btn--sm">Uninstall</button>
-                    </form>
-                <?php endif; ?>
+                <form method="POST" style="margin:0" onsubmit="return confirm('Uninstall <?= htmlspecialchars(addslashes($plugin->name)) ?>? This cannot be undone.')">
+                    <input type="hidden" name="act" value="uninstall_plugin">
+                    <input type="hidden" name="slug" value="<?= htmlspecialchars($plugin->slug) ?>">
+                    <button class="btn btn--danger btn--sm">Uninstall</button>
+                </form>
             </div>
         </div>
 
@@ -1128,17 +1158,63 @@ function pagePlugins(): void
         </form>
         <?php endif; ?>
     </div>
-    <?php endforeach; ?>
+    <?php endforeach; endif; ?>
 
-    <div class="section-title" style="margin-top:32px;">Install third-party plugin</div>
-    <p class="body-text">Paste the direct URL to a GitHub release <code>.zip</code> file. The zip must contain a valid <code>plugin.json</code>.</p>
+    <!-- ── Plugin store ──────────────────────────────────────────────────── -->
+    <div class="section-title" style="margin-top:32px;">Plugin Store</div>
+
+    <?php if ($catalogueErr): ?>
+        <div class="alert alert--error"><?= htmlspecialchars($catalogueErr) ?></div>
+    <?php elseif (empty($available)): ?>
+        <div class="empty">All available plugins are already installed.</div>
+    <?php else: ?>
+        <div class="store-grid">
+        <?php foreach ($available as $p): ?>
+            <div class="store-card">
+                <div class="store-card-header">
+                    <div class="plugin-meta">
+                        <span class="plugin-name"><?= htmlspecialchars($p['name']) ?></span>
+                        <span class="plugin-badge plugin-badge--<?= htmlspecialchars($p['tier']) ?>"><?= htmlspecialchars($p['tier']) ?></span>
+                        <?php if ($p['recommended']): ?>
+                            <span class="plugin-badge plugin-badge--recommended">Recommended</span>
+                        <?php endif; ?>
+                        <?php if ($p['version'] ?? null): ?>
+                            <span class="plugin-ver">v<?= htmlspecialchars($p['version']) ?></span>
+                        <?php endif; ?>
+                    </div>
+                    <?php if ($p['description'] ?? null): ?>
+                        <div class="plugin-desc"><?= htmlspecialchars($p['description']) ?></div>
+                    <?php endif; ?>
+                </div>
+                <div class="store-card-footer">
+                    <?php if ($p['homepage'] ?? null): ?>
+                        <a href="<?= htmlspecialchars($p['homepage']) ?>" target="_blank" class="btn btn--ghost btn--sm">Docs</a>
+                    <?php endif; ?>
+                    <?php if ($p['github_zip_url'] ?? null): ?>
+                        <form method="POST" style="margin:0">
+                            <input type="hidden" name="act" value="install_plugin">
+                            <input type="hidden" name="url" value="<?= htmlspecialchars($p['github_zip_url']) ?>">
+                            <button class="btn btn--primary btn--sm">Install</button>
+                        </form>
+                    <?php else: ?>
+                        <span class="muted" style="font-size:12px;">No download available</span>
+                    <?php endif; ?>
+                </div>
+            </div>
+        <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
+
+    <!-- ── Install unofficial ────────────────────────────────────────────── -->
+    <div class="section-title" style="margin-top:32px;">Install unofficial plugin</div>
+    <p class="body-text">Paste a direct link to a GitHub release <code>.zip</code>. Unofficial plugins run in a sandboxed iframe and cannot access your data directly.</p>
     <form method="POST">
         <input type="hidden" name="act" value="install_plugin">
         <div class="form-group">
-            <label class="label">Plugin .zip URL</label>
+            <label class="label">GitHub release .zip URL</label>
             <input class="input" type="url" name="url" placeholder="https://github.com/…/releases/download/v1.0.0/plugin.zip" style="max-width:540px;" required />
         </div>
-        <button class="btn btn--primary">Install plugin</button>
+        <button class="btn btn--ghost">Install</button>
     </form>
     <?php
 }
@@ -1303,6 +1379,11 @@ code{background:rgba(255,255,255,.06);border-radius:3px;padding:1px 5px;font-siz
 .emote-img{width:48px;height:48px;object-fit:contain;border-radius:4px}
 .emote-name{font-size:11px;font-family:monospace;color:rgba(255,255,255,.55);text-align:center;word-break:break-all}
 .emote-anim-badge{position:absolute;top:6px;right:6px;font-size:9px;font-weight:700;background:rgba(88,101,242,.3);color:#a5b4fc;border-radius:3px;padding:1px 4px;letter-spacing:.04em}
+.store-grid{display:flex;flex-direction:column;gap:10px}
+.store-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:16px 20px;display:flex;flex-direction:column;gap:10px}
+.store-card-header{display:flex;flex-direction:column;gap:6px}
+.store-card-footer{display:flex;gap:8px;align-items:center}
+.plugin-badge--recommended{background:rgba(251,191,36,.15);color:#fcd34d}
 </style>
 </head>
 <body>

@@ -9,38 +9,9 @@ use Illuminate\Http\Request;
 
 class PluginController extends Controller
 {
-    // Official plugin definitions — source of truth for what's available
-    const OFFICIAL_PLUGINS = [
-        'gif-picker' => [
-            'name'     => 'GIF Picker',
-            'manifest' => [
-                'description' => 'Search and insert GIFs from Tenor and Giphy',
-                'version'     => '1.0.0',
-                'zones'       => ['input'],
-                'settings'    => [
-                    ['key' => 'tenor_key', 'label' => 'Tenor API Key', 'type' => 'text', 'placeholder' => 'Google Cloud API key with Tenor API enabled — console.cloud.google.com'],
-                    ['key' => 'giphy_key', 'label' => 'Giphy API Key', 'type' => 'text', 'placeholder' => 'Free key at developers.giphy.com'],
-                ],
-            ],
-        ],
-        'emoticon-picker' => [
-            'name'     => 'Emoticon Picker',
-            'manifest' => [
-                'description' => 'Standard emoji and custom animated server emotes',
-                'version'     => '1.0.0',
-                'zones'       => ['input'],
-                'settings'    => [],
-            ],
-        ],
-    ];
-
     public function index(Request $request): JsonResponse
     {
-        // Make sure official plugin rows exist
-        Plugin::syncOfficial(self::OFFICIAL_PLUGINS);
-
         $plugins = Plugin::all()->map(function (Plugin $p) {
-            // Merge settings values into the manifest for the frontend
             $manifest = $p->manifest;
             if (isset($manifest['settings'])) {
                 foreach ($manifest['settings'] as &$setting) {
@@ -164,12 +135,6 @@ class PluginController extends Controller
         $slug = preg_replace('/[^a-z0-9\-]/', '', strtolower($manifest['slug']));
         $tier = $manifest['tier'];
 
-        // Prevent overriding official plugins
-        if (array_key_exists($slug, self::OFFICIAL_PLUGINS)) {
-            $zip->close(); @unlink($tmpZip);
-            return response()->json(['message' => 'Cannot install over a built-in official plugin.'], 422);
-        }
-
         if (! in_array($tier, ['approved', 'unofficial'])) {
             $zip->close(); @unlink($tmpZip);
             return response()->json(['message' => 'Only approved or unofficial plugins can be installed.'], 422);
@@ -230,11 +195,6 @@ class PluginController extends Controller
         $member = $request->attributes->get('member');
         if (! $member?->isAdmin()) {
             return response()->json(['message' => 'Forbidden.'], 403);
-        }
-
-        // Cannot uninstall official plugins
-        if (array_key_exists($slug, self::OFFICIAL_PLUGINS)) {
-            return response()->json(['message' => 'Cannot uninstall built-in plugins.'], 422);
         }
 
         $plugin = Plugin::find($slug);
