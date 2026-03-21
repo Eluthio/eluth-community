@@ -55,6 +55,7 @@ import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 const props = defineProps({
     settings:  { type: Object, default: () => ({}) },
     authToken: { type: String, default: '' },
+    apiBase:   { type: String, default: '' },
 })
 const emit = defineEmits(['insert'])
 
@@ -105,7 +106,8 @@ async function search() {
     results.value = []
     try {
         const q        = query.value.trim()
-        const endpoint = q ? `/api/plugins/gif-picker/search?q=${encodeURIComponent(q)}` : '/api/plugins/gif-picker/trending'
+        const base     = props.apiBase.replace(/\/$/, '')
+        const endpoint = base + (q ? `/api/plugins/gif-picker/search?q=${encodeURIComponent(q)}` : '/api/plugins/gif-picker/trending')
         const token    = props.authToken ?? ''
         const res      = await fetch(endpoint, {
             headers: { Authorization: 'Bearer ' + token },
