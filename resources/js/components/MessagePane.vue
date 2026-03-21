@@ -80,6 +80,12 @@
                 <button class="reply-bar-close" @click="replyTo = null" title="Cancel reply">✕</button>
             </div>
 
+            <!-- GIF preview attachment -->
+            <div v-if="pendingGif" class="gif-attachment">
+                <img :src="pendingGif" class="gif-attachment-thumb" />
+                <button class="gif-attachment-remove" @click="pendingGif = null" title="Remove GIF">✕</button>
+            </div>
+
             <div class="message-input-wrap">
                 <button class="input-action" title="Attach" style="font-size:19px;">⊕</button>
                 <textarea
@@ -589,19 +595,27 @@ onUnmounted(() => {
 function onDocEsc(e) { if (e.key === 'Escape') { closeMenu(); closeMention() } }
 
 // ── GIF insert ────────────────────────────────────────────────────────────
+const pendingGif = ref(null)
+
 function insertGif(url) {
-    // Append the GIF URL to the draft message
-    draft.value = (draft.value ? draft.value + ' ' : '') + url
+    pendingGif.value = url
     nextTick(() => inputEl.value?.focus())
 }
 
 // ── Send ──────────────────────────────────────────────────────────────────
 function send() {
-    const content = draft.value.trim()
-    if (!content) return
+    const text = draft.value.trim()
+    const gif  = pendingGif.value
+
+    if (!text && !gif) return
+
+    // Combine text and GIF URL — GIF goes on its own line after any text
+    const content = [text, gif].filter(Boolean).join('\n')
+
     emit('send', { content, replyToId: replyTo.value?.id ?? null })
-    draft.value = ''
-    replyTo.value = null
+    draft.value    = ''
+    pendingGif.value = null
+    replyTo.value  = null
     closeMention()
     nextTick(() => { if (inputEl.value) inputEl.value.style.height = 'auto' })
 }
@@ -637,6 +651,35 @@ watch(() => props.messages.length, async () => {
     max-height: 200px;
     border-radius: 6px;
     margin-top: 4px;
+}
+
+.gif-attachment {
+    position: relative;
+    display: inline-block;
+    margin: 4px 12px 0;
+}
+.gif-attachment-thumb {
+    display: block;
+    max-height: 120px;
+    max-width: 200px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.1);
+}
+.gif-attachment-remove {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.7);
+    border: none;
+    color: #fff;
+    font-size: 10px;
+    line-height: 18px;
+    text-align: center;
+    cursor: pointer;
+    padding: 0;
 }
 
 .stream-zone {

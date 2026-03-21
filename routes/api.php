@@ -158,10 +158,12 @@ Route::middleware('auth.central')->group(function () {
     Route::post('/admin/roles/{roleId}/delete',       [AdminController::class, 'deleteRole']);
 
     // Plugins
-    Route::get('/plugins',                          [PluginController::class, 'index']);
-    Route::post('/admin/plugins/{slug}/enable',     [PluginController::class, 'enable']);
-    Route::post('/admin/plugins/{slug}/disable',    [PluginController::class, 'disable']);
-    Route::post('/admin/plugins/{slug}/settings',   [PluginController::class, 'updateSettings']);
+    Route::get('/plugins',                              [PluginController::class, 'index']);
+    Route::get('/plugins/gif-picker/search',            [PluginController::class, 'gifSearch']);
+    Route::get('/plugins/gif-picker/trending',          [PluginController::class, 'gifTrending']);
+    Route::post('/admin/plugins/{slug}/enable',         [PluginController::class, 'enable']);
+    Route::post('/admin/plugins/{slug}/disable',        [PluginController::class, 'disable']);
+    Route::post('/admin/plugins/{slug}/settings',       [PluginController::class, 'updateSettings']);
 
     // Debug log — admin only, only when APP_DEBUG is true
     Route::get('/admin/debug-log', function (Request $request) {

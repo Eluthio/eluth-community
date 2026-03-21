@@ -1,5 +1,5 @@
 <template>
-    <div class="gif-picker-wrap">
+    <div class="gif-picker-wrap" ref="wrapRef">
         <button
             class="gif-btn"
             :class="{ active: open }"
@@ -7,81 +7,90 @@
             @click.stop="toggle"
         >GIF</button>
 
-        <div v-if="open" class="gif-panel" @click.stop>
-            <div class="gif-panel-header">
-                <div class="gif-tabs">
-                    <button
-                        v-for="p in availableProviders"
-                        :key="p.id"
-                        class="gif-tab"
-                        :class="{ active: provider === p.id }"
-                        @click="provider = p.id; search()"
-                    >{{ p.label }}</button>
+        <Teleport to="body">
+            <div v-if="open" class="gif-panel" :style="panelStyle" @click.stop>
+                <div class="gif-panel-header">
+                    <input
+                        v-model="query"
+                        class="gif-search"
+                        placeholder="Search GIFs…"
+                        @input="onSearchInput"
+                        @keydown.enter.prevent="search"
+                        ref="searchInput"
+                    />
                 </div>
-                <input
-                    v-model="query"
-                    class="gif-search"
-                    placeholder="Search GIFs…"
-                    @input="onSearchInput"
-                    @keydown.enter.prevent="search"
-                    autofocus
-                />
+
+                <div v-if="!hasKey" class="gif-no-key">
+                    No Giphy API key configured.<br>
+                    <small>An admin can add one in <strong>Settings → Plugins</strong>.</small>
+                </div>
+
+                <div v-else-if="loading" class="gif-loading">Searching…</div>
+
+                <div v-else-if="results.length === 0 && query" class="gif-empty">No results.</div>
+
+                <div v-else class="gif-grid">
+                    <img
+                        v-for="gif in results"
+                        :key="gif.id"
+                        :src="gif.preview"
+                        :title="gif.title"
+                        class="gif-thumb"
+                        loading="lazy"
+                        @click="pick(gif)"
+                    />
+                </div>
+
+                <div class="gif-attribution">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/2/23/Giphy-logo.svg/320px-Giphy-logo.svg.png" alt="Powered by GIPHY" class="giphy-logo" />
+                </div>
             </div>
-
-            <div v-if="!hasKey" class="gif-no-key">
-                No API key configured. An admin must add a Tenor or Giphy key in Plugin Settings.
-            </div>
-
-            <div v-else-if="loading" class="gif-loading">Searching…</div>
-
-            <div v-else-if="results.length === 0 && query" class="gif-empty">No results.</div>
-
-            <div v-else class="gif-grid">
-                <img
-                    v-for="gif in results"
-                    :key="gif.id"
-                    :src="gif.preview"
-                    :title="gif.title"
-                    class="gif-thumb"
-                    loading="lazy"
-                    @click="pick(gif)"
-                />
-            </div>
-        </div>
+        </Teleport>
     </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 
 const props = defineProps({
     settings: { type: Object, default: () => ({}) },
 })
 const emit = defineEmits(['insert'])
 
-const open     = ref(false)
-const query    = ref('')
-const results  = ref([])
-const loading  = ref(false)
-const provider = ref('')
+const wrapRef    = ref(null)
+const searchInput = ref(null)
+const open       = ref(false)
+const query      = ref('')
+const results    = ref([])
+const loading    = ref(false)
+const panelStyle = ref({})
 
 let debounceTimer = null
 
-const availableProviders = computed(() => {
-    const list = []
-    if (props.settings?.tenor_key) list.push({ id: 'tenor', label: 'Tenor' })
-    if (props.settings?.giphy_key) list.push({ id: 'giphy', label: 'Giphy' })
-    return list
-})
-
-const hasKey = computed(() => availableProviders.value.length > 0)
+const hasKey = computed(() => !!props.settings?.giphy_key)
 
 function toggle() {
-    open.value = !open.value
-    if (open.value && !provider.value && availableProviders.value.length) {
-        provider.value = availableProviders.value[0].id
-        search()
+    if (!open.value) {
+        const rect = wrapRef.value.getBoundingClientRect()
+        const left = Math.max(8, Math.min(rect.left, window.innerWidth - 376))
+        panelStyle.value = {
+            left:   left + 'px',
+            bottom: (window.innerHeight - rect.top + 8) + 'px',
+        }
+        open.value = true
+        if (hasKey.value) {
+            search()
+            nextTick(() => searchInput.value?.focus())
+        }
+    } else {
+        close()
     }
+}
+
+function close() {
+    open.value = false
+    query.value = ''
+    results.value = []
 }
 
 function onSearchInput() {
@@ -91,17 +100,18 @@ function onSearchInput() {
 
 async function search() {
     if (!hasKey.value) return
-    if (!provider.value && availableProviders.value.length) {
-        provider.value = availableProviders.value[0].id
-    }
     loading.value = true
     results.value = []
     try {
-        if (provider.value === 'tenor') {
-            results.value = await searchTenor()
-        } else {
-            results.value = await searchGiphy()
-        }
+        const q        = query.value.trim()
+        const endpoint = q ? `/api/plugins/gif-picker/search?q=${encodeURIComponent(q)}` : '/api/plugins/gif-picker/trending'
+        const token    = localStorage.getItem('eluth_token') ?? ''
+        const res      = await fetch(endpoint, {
+            headers: { Authorization: 'Bearer ' + token },
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        results.value = data.gifs ?? []
     } catch {
         results.value = []
     } finally {
@@ -109,51 +119,22 @@ async function search() {
     }
 }
 
-async function searchTenor() {
-    const q   = query.value || 'trending'
-    const key = props.settings.tenor_key
-    const url = `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=${encodeURIComponent(key)}&limit=24&media_filter=gif`
-    const res = await fetch(url)
-    if (!res.ok) return []
-    const data = await res.json()
-    return (data.results ?? []).map(r => ({
-        id:      r.id,
-        title:   r.title || '',
-        preview: r.media_formats?.tinygif?.url ?? r.media_formats?.gif?.url ?? '',
-        url:     r.media_formats?.gif?.url ?? '',
-    })).filter(g => g.url)
-}
-
-async function searchGiphy() {
-    const q   = query.value || 'trending'
-    const key = props.settings.giphy_key
-    const endpoint = query.value
-        ? `https://api.giphy.com/v1/gifs/search?q=${encodeURIComponent(q)}&api_key=${encodeURIComponent(key)}&limit=24&rating=g`
-        : `https://api.giphy.com/v1/gifs/trending?api_key=${encodeURIComponent(key)}&limit=24&rating=g`
-    const res = await fetch(endpoint)
-    if (!res.ok) return []
-    const data = await res.json()
-    return (data.data ?? []).map(r => ({
-        id:      r.id,
-        title:   r.title || '',
-        preview: r.images?.fixed_height_small?.url ?? r.images?.original?.url ?? '',
-        url:     r.images?.original?.url ?? '',
-    })).filter(g => g.url)
-}
-
 function pick(gif) {
     emit('insert', gif.url)
-    open.value = false
-    query.value = ''
-    results.value = []
+    close()
 }
 
 function onClickOutside(e) {
-    if (open.value) open.value = false
+    if (open.value && wrapRef.value && !wrapRef.value.contains(e.target)) {
+        close()
+    }
 }
 
 onMounted(() => document.addEventListener('click', onClickOutside))
-onUnmounted(() => document.removeEventListener('click', onClickOutside))
+onUnmounted(() => {
+    document.removeEventListener('click', onClickOutside)
+    clearTimeout(debounceTimer)
+})
 </script>
 
 <style scoped>
@@ -181,47 +162,22 @@ onUnmounted(() => document.removeEventListener('click', onClickOutside))
 }
 
 .gif-panel {
-    position: absolute;
-    bottom: calc(100% + 8px);
-    left: 0;
+    position: fixed;
     width: 360px;
-    max-height: 420px;
+    max-height: 440px;
     background: var(--bg-secondary, #2b2d31);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 8px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    z-index: 1000;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    z-index: 9999;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
 }
 
 .gif-panel-header {
     padding: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
     border-bottom: 1px solid rgba(255,255,255,0.06);
-}
-
-.gif-tabs {
-    display: flex;
-    gap: 4px;
-}
-
-.gif-tab {
-    background: transparent;
-    border: 1px solid rgba(255,255,255,0.15);
-    color: rgba(255,255,255,0.6);
-    border-radius: 4px;
-    padding: 2px 10px;
-    font-size: 12px;
-    cursor: pointer;
-    transition: all 0.15s;
-}
-.gif-tab.active, .gif-tab:hover {
-    border-color: var(--accent, #5865f2);
-    color: var(--accent, #5865f2);
 }
 
 .gif-search {
@@ -261,5 +217,17 @@ onUnmounted(() => document.removeEventListener('click', onClickOutside))
     text-align: center;
     color: rgba(255,255,255,0.4);
     font-size: 13px;
+    flex: 1;
+}
+
+.gif-attribution {
+    padding: 6px 8px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    display: flex;
+    justify-content: flex-end;
+}
+.giphy-logo {
+    height: 14px;
+    opacity: 0.5;
 }
 </style>

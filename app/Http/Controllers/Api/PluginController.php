@@ -18,8 +18,8 @@ class PluginController extends Controller
                 'version'     => '1.0.0',
                 'zones'       => ['input'],
                 'settings'    => [
-                    ['key' => 'tenor_key',  'label' => 'Tenor API Key',  'type' => 'text', 'placeholder' => 'Get free key at tenor.com/gifapi'],
-                    ['key' => 'giphy_key',  'label' => 'Giphy API Key',  'type' => 'text', 'placeholder' => 'Get free key at developers.giphy.com'],
+                    ['key' => 'tenor_key', 'label' => 'Tenor API Key', 'type' => 'text', 'placeholder' => 'Google Cloud API key with Tenor API enabled — console.cloud.google.com'],
+                    ['key' => 'giphy_key', 'label' => 'Giphy API Key', 'type' => 'text', 'placeholder' => 'Free key at developers.giphy.com'],
                 ],
             ],
         ],
@@ -99,5 +99,58 @@ class PluginController extends Controller
         }
 
         return response()->json(['ok' => true]);
+    }
+
+    // ── GIF Picker proxy ─────────────────────────────────────────────────────
+
+    /**
+     * Proxy Giphy search — keeps the API key server-side.
+     * GET /api/plugins/gif-picker/search?q={query}
+     */
+    public function gifSearch(Request $request): JsonResponse
+    {
+        return $this->giphyRequest('search', $request->query('q', ''));
+    }
+
+    /**
+     * Proxy Giphy trending.
+     * GET /api/plugins/gif-picker/trending
+     */
+    public function gifTrending(): JsonResponse
+    {
+        return $this->giphyRequest('trending', '');
+    }
+
+    private function giphyRequest(string $type, string $query): JsonResponse
+    {
+        $key = \DB::table('server_settings')->where('key', 'plugin_gif-picker_giphy_key')->value('value');
+
+        if (! $key) {
+            return response()->json(['gifs' => []]);
+        }
+
+        $base = 'https://api.giphy.com/v1/gifs/';
+
+        if ($type === 'search' && $query !== '') {
+            $url = $base . 'search?api_key=' . urlencode($key)
+                 . '&q=' . urlencode($query) . '&limit=24&rating=g&lang=en';
+        } else {
+            $url = $base . 'trending?api_key=' . urlencode($key) . '&limit=24&rating=g';
+        }
+
+        $response = \Http::timeout(5)->get($url);
+
+        if (! $response->ok()) {
+            return response()->json(['gifs' => []]);
+        }
+
+        $gifs = collect($response->json('data', []))->map(fn ($r) => [
+            'id'      => $r['id'],
+            'title'   => $r['title'] ?? '',
+            'preview' => $r['images']['fixed_height_small']['url'] ?? $r['images']['original']['url'] ?? '',
+            'url'     => $r['images']['original']['url'] ?? '',
+        ])->filter(fn ($g) => $g['url'])->values();
+
+        return response()->json(['gifs' => $gifs]);
     }
 }
