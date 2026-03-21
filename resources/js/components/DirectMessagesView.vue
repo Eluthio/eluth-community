@@ -178,6 +178,7 @@ async function loadConversations() {
 
 async function openConversation(conv) {
     activeConv.value = conv
+    localStorage.setItem('ui_active_dm_conv', conv.id)
     await loadMessages()
 }
 
@@ -293,6 +294,12 @@ onMounted(async () => {
     } else if (props.openWithConvId) {
         const conv = conversations.value.find(c => c.id === props.openWithConvId)
         if (conv) await openConversation(conv)
+    } else {
+        const savedId = localStorage.getItem('ui_active_dm_conv')
+        if (savedId) {
+            const conv = conversations.value.find(c => c.id === savedId)
+            if (conv) await openConversation(conv)
+        }
     }
 })
 
