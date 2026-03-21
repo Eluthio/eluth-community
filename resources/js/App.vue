@@ -129,6 +129,10 @@
                         :messages="messages"
                         :members="members"
                         :current-member="currentMemberProxy"
+                        :channel="activeChannel"
+                        :can-stream="currentMemberProxy?.can('stream') ?? false"
+                        api-base=""
+                        :auth-token="authToken"
                         @send="sendMessage"
                         @kick="kickMember"
                         @ban="banMember"
@@ -680,7 +684,36 @@ function onNewDm({ author, content }) {
 }
 
 // ── WebSocket ──────────────────────────────────────────────────────────────
-let echoChannel = null
+let echoChannel      = null
+let serverEchoChannel = null
+
+function subscribeToServerChannel() {
+    if (serverEchoChannel) return
+    try {
+        serverEchoChannel = window._echo.channel('server')
+            .listen('.channel.live.started', ({ channel_id, streamer_username }) => {
+                // Update the sections data so the LIVE badge appears immediately
+                sections.value = sections.value.map(section => ({
+                    ...section,
+                    channels: section.channels.map(ch =>
+                        ch.id === channel_id
+                            ? { ...ch, is_live: true, live_streamer_username: streamer_username }
+                            : ch
+                    ),
+                }))
+            })
+            .listen('.channel.live.ended', ({ channel_id }) => {
+                sections.value = sections.value.map(section => ({
+                    ...section,
+                    channels: section.channels.map(ch =>
+                        ch.id === channel_id
+                            ? { ...ch, is_live: false, live_streamer_username: null }
+                            : ch
+                    ),
+                }))
+            })
+    } catch { /* ignore */ }
+}
 
 function subscribeToChannel(channelId) {
     if (echoChannel) echoChannel.stopListening('.message.sent')
@@ -750,6 +783,8 @@ async function loadChannels() {
         await loadMessages(activeChannelId.value)
         subscribeToChannel(activeChannelId.value)
     }
+
+    subscribeToServerChannel()
 }
 
 async function loadMembers() {

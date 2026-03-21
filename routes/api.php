@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\ChannelController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\MemberController;
+use App\Http\Controllers\Api\StreamController;
 use Illuminate\Support\Facades\Route;
 
 // Public: runtime config for the frontend (replaces baked-in VITE_ env vars)
@@ -153,4 +154,13 @@ Route::middleware('auth.central')->group(function () {
     Route::post('/admin/roles/{roleId}/update',       [AdminController::class, 'updateRole']);
     Route::delete('/admin/roles/{roleId}',            [AdminController::class, 'deleteRole']);
     Route::post('/admin/roles/{roleId}/delete',       [AdminController::class, 'deleteRole']);
+
+    // Streaming — mutating endpoints require auth
+    Route::post('/streams/{channel}/start',  [StreamController::class, 'start']);
+    Route::post('/streams/{channel}/chunk',  [StreamController::class, 'chunk']);
+    Route::post('/streams/{channel}/stop',   [StreamController::class, 'stop']);
 });
+
+// Stream read endpoints — public (no auth, so viewers can fetch state and chunks)
+Route::get('/streams/{channel}/state',        [StreamController::class, 'state']);
+Route::get('/streams/{channel}/chunks/{seq}', [StreamController::class, 'serveChunk']);

@@ -25,6 +25,8 @@ class Permissions
     const DEAFEN_MEMBERS      = 'deafen_members';
     const MOVE_MEMBERS        = 'move_members';
     const PRIORITY_SPEAKER    = 'priority_speaker';
+    // Streaming
+    const STREAM              = 'stream';
 
     const ALL = [
         self::MANAGE_SERVER, self::MANAGE_ROLES, self::VIEW_AUDIT_LOG,
@@ -34,6 +36,7 @@ class Permissions
         self::MENTION_EVERYONE,
         self::JOIN_VOICE, self::SPEAK, self::VIDEO,
         self::MUTE_MEMBERS, self::DEAFEN_MEMBERS, self::MOVE_MEMBERS, self::PRIORITY_SPEAKER,
+        self::STREAM,
     ];
 
     const CATEGORIES = [
@@ -66,6 +69,9 @@ class Permissions
             self::DEAFEN_MEMBERS   => 'Server deafen members',
             self::MOVE_MEMBERS     => 'Move members between voice channels',
             self::PRIORITY_SPEAKER => 'Priority speaker (voice ducking)',
+        ],
+        'Streaming' => [
+            self::STREAM => 'Go live in stream channels',
         ],
     ];
 

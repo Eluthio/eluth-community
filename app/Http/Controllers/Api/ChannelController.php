@@ -20,11 +20,13 @@ class ChannelController extends Controller
                 'id'       => $label,
                 'label'    => $label,
                 'channels' => $group->map(fn ($ch) => [
-                    'id'         => $ch->id,
-                    'name'       => $ch->name,
-                    'type'       => $ch->type,
-                    'topic'      => $ch->topic,
-                    'is_private' => $ch->is_private,
+                    'id'                   => $ch->id,
+                    'name'                 => $ch->name,
+                    'type'                 => $ch->type,
+                    'topic'                => $ch->topic,
+                    'is_private'           => $ch->is_private,
+                    'is_live'              => (bool) $ch->is_live,
+                    'live_streamer_username' => $ch->live_streamer_username,
                 ])->values(),
             ])
             ->values();
@@ -62,7 +64,7 @@ class ChannelController extends Controller
         $validated = $request->validate([
             'section_id' => 'required|string|max:64',
             'name'       => 'required|string|max:100',
-            'type'       => 'required|in:text,announcement,voice,video',
+            'type'       => 'required|in:text,announcement,voice,video,stream',
         ]);
 
         $maxPos = Channel::where('section', $validated['section_id'])->max('position') ?? 0;
@@ -75,11 +77,13 @@ class ChannelController extends Controller
         ]);
 
         return response()->json(['channel' => [
-            'id'         => $channel->id,
-            'name'       => $channel->name,
-            'type'       => $channel->type,
-            'topic'      => $channel->topic,
-            'is_private' => $channel->is_private,
+            'id'                    => $channel->id,
+            'name'                  => $channel->name,
+            'type'                  => $channel->type,
+            'topic'                 => $channel->topic,
+            'is_private'            => $channel->is_private,
+            'is_live'               => false,
+            'live_streamer_username' => null,
         ]], 201);
     }
 
@@ -89,7 +93,7 @@ class ChannelController extends Controller
 
         $validated = $request->validate([
             'name'       => 'required|string|max:100',
-            'type'       => 'required|in:text,announcement,voice,video',
+            'type'       => 'required|in:text,announcement,voice,video,stream',
             'topic'      => 'nullable|string|max:500',
             'is_private' => 'boolean',
         ]);
@@ -97,11 +101,13 @@ class ChannelController extends Controller
         $channel->update($validated);
 
         return response()->json(['channel' => [
-            'id'         => $channel->id,
-            'name'       => $channel->name,
-            'type'       => $channel->type,
-            'topic'      => $channel->topic,
-            'is_private' => $channel->is_private,
+            'id'                    => $channel->id,
+            'name'                  => $channel->name,
+            'type'                  => $channel->type,
+            'topic'                 => $channel->topic,
+            'is_private'            => $channel->is_private,
+            'is_live'               => (bool) $channel->is_live,
+            'live_streamer_username' => $channel->live_streamer_username,
         ]]);
     }
 

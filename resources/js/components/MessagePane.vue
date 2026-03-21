@@ -1,5 +1,41 @@
 <template>
     <div id="main">
+
+        <!-- Stream channel: player or offline placeholder -->
+        <template v-if="props.channel?.type === 'stream'">
+            <div class="stream-zone">
+                <!-- Live: show player -->
+                <StreamPlayer
+                    v-if="props.channel.is_live"
+                    :channel-id="props.channel.id"
+                    :api-base="props.apiBase"
+                    :streamer-username="props.channel.live_streamer_username ?? ''"
+                    @error="onStreamError"
+                />
+
+                <!-- Not live: placeholder -->
+                <div v-else class="stream-offline">
+                    <div class="stream-offline-icon">📺</div>
+                    <div class="stream-offline-title">Nobody is streaming yet</div>
+                    <div v-if="props.canStream" class="stream-offline-hint">Click Go Live below to start streaming</div>
+                </div>
+
+                <!-- Streamer controls: shown to the user who has stream permission -->
+                <div v-if="props.canStream" class="stream-controls">
+                    <template v-if="!isStreaming">
+                        <button class="stream-go-live-btn" @click="startStream" :disabled="streamStarting || props.channel.is_live">
+                            {{ streamStarting ? 'Starting…' : props.channel.is_live ? 'Channel is live' : '🔴 Go Live' }}
+                        </button>
+                        <div v-if="streamError" class="stream-error">{{ streamError }}</div>
+                    </template>
+                    <template v-else>
+                        <div class="stream-live-indicator">🔴 You are live · {{ streamDuration }}</div>
+                        <button class="stream-stop-btn" @click="stopStream">⏹ Stop Stream</button>
+                    </template>
+                </div>
+            </div>
+        </template>
+
         <div id="messages" ref="messagesEl">
             <div v-if="visibleGroups.length === 0" class="empty-state">
                 <div class="empty-state-icon">✦</div>
@@ -136,6 +172,7 @@
 <script setup>
 import { ref, computed, watch, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { gsap } from 'gsap'
+import StreamPlayer from './StreamPlayer.vue'
 
 const props = defineProps({
     channelName:   { type: String, default: 'general' },
@@ -143,6 +180,10 @@ const props = defineProps({
     messages:      { type: Array,  default: () => [] },
     members:       { type: Array,  default: () => [] },
     currentMember: { type: Object, default: null },
+    channel:       { type: Object, default: null },   // full channel object (type, is_live, etc.)
+    canStream:     { type: Boolean, default: false },
+    apiBase:       { type: String, default: '' },
+    authToken:     { type: String, default: '' },
 })
 const emit = defineEmits(['send', 'kick', 'ban', 'open-dm', 'open-user-settings', 'view-profile'])
 
@@ -150,6 +191,126 @@ const draft      = ref('')
 const replyTo    = ref(null)   // { id, author, preview }
 const messagesEl = ref(null)
 const inputEl    = ref(null)
+
+// ── Streaming ──────────────────────────────────────────────────────────────
+const isStreaming    = ref(false)
+const streamStarting = ref(false)
+const streamError    = ref('')
+const streamDuration = ref('0:00')
+
+let mediaRecorder  = null
+let mediaStream    = null
+let streamSeq      = 0
+let streamTimer    = null
+let streamStartTs  = 0
+
+function updateStreamDuration() {
+    const elapsed = Math.floor((Date.now() - streamStartTs) / 1000)
+    const m = Math.floor(elapsed / 60)
+    const s = elapsed % 60
+    streamDuration.value = `${m}:${String(s).padStart(2, '0')}`
+}
+
+async function startStream() {
+    streamError.value = ''
+    streamStarting.value = true
+
+    try {
+        // Capture display + system audio
+        mediaStream = await navigator.mediaDevices.getDisplayMedia({
+            video: { frameRate: { ideal: 30, max: 60 } },
+            audio: true,
+        })
+
+        // Pick best supported mimeType
+        const candidates = [
+            'video/webm;codecs=vp9,opus',
+            'video/webm;codecs=vp8,opus',
+            'video/webm',
+        ]
+        const mimeType = candidates.find(m => MediaRecorder.isTypeSupported(m)) ?? 'video/webm'
+
+        // Notify server we're starting
+        const res = await fetch(`${props.apiBase}/api/streams/${props.channel.id}/start`, {
+            method: 'POST',
+            headers: {
+                Authorization: 'Bearer ' + props.authToken,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ mime_type: mimeType }),
+        })
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}))
+            throw new Error(err.message ?? 'Failed to start stream')
+        }
+
+        streamSeq = 0
+        isStreaming.value = true
+        streamStartTs = Date.now()
+        streamTimer = setInterval(updateStreamDuration, 1000)
+
+        mediaRecorder = new MediaRecorder(mediaStream, { mimeType, timeslice: 4000 })
+
+        mediaRecorder.ondataavailable = async (e) => {
+            if (!e.data || e.data.size === 0 || !isStreaming.value) return
+            const seq = streamSeq++
+            const form = new FormData()
+            form.append('seq', seq)
+            form.append('chunk', e.data, 'chunk.webm')
+            try {
+                await fetch(`${props.apiBase}/api/streams/${props.channel.id}/chunk`, {
+                    method: 'POST',
+                    headers: { Authorization: 'Bearer ' + props.authToken },
+                    body: form,
+                })
+            } catch { /* ignore individual chunk failures */ }
+        }
+
+        mediaRecorder.onstop = () => {
+            mediaStream?.getTracks().forEach(t => t.stop())
+            mediaStream = null
+        }
+
+        // If user stops sharing via browser UI, clean up
+        mediaStream.getVideoTracks()[0]?.addEventListener('ended', () => stopStream())
+
+        mediaRecorder.start(4000)
+    } catch (e) {
+        streamError.value = e.name === 'NotAllowedError'
+            ? 'Screen share was cancelled.'
+            : (e.message ?? 'Could not start stream.')
+        mediaStream?.getTracks().forEach(t => t.stop())
+        mediaStream = null
+    } finally {
+        streamStarting.value = false
+    }
+}
+
+async function stopStream() {
+    isStreaming.value = false
+    clearInterval(streamTimer)
+    streamDuration.value = '0:00'
+
+    mediaRecorder?.stop()
+    mediaRecorder = null
+
+    try {
+        await fetch(`${props.apiBase}/api/streams/${props.channel.id}/stop`, {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + props.authToken },
+        })
+    } catch { /* ignore */ }
+}
+
+function onStreamError(reason) {
+    if (reason === 'ended') {
+        // Remote stop — streamer ended from another device
+        isStreaming.value = false
+        clearInterval(streamTimer)
+        mediaRecorder?.stop()
+        mediaRecorder = null
+    }
+}
 
 // ── Mute ──────────────────────────────────────────────────────────────────
 const MUTE_KEY   = 'muted_users'
@@ -409,6 +570,8 @@ onUnmounted(() => {
     document.removeEventListener('click',       closeMenu)
     document.removeEventListener('contextmenu', closeMenu)
     document.removeEventListener('keydown',     onDocEsc)
+    if (isStreaming.value) stopStream()
+    clearInterval(streamTimer)
 })
 function onDocEsc(e) { if (e.key === 'Escape') { closeMenu(); closeMention() } }
 
@@ -446,3 +609,73 @@ watch(() => props.messages.length, async () => {
     messagesEl.value.scrollTo({ top: messagesEl.value.scrollHeight, behavior: 'smooth' })
 })
 </script>
+
+<style scoped>
+.stream-zone {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.stream-offline {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 32px 16px;
+    color: #64748b;
+    text-align: center;
+}
+.stream-offline-icon  { font-size: 40px; }
+.stream-offline-title { font-size: 15px; font-weight: 600; color: #94a3b8; }
+.stream-offline-hint  { font-size: 12px; }
+
+.stream-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: rgba(0,0,0,0.15);
+    border-top: 1px solid rgba(255,255,255,0.05);
+}
+
+.stream-go-live-btn {
+    background: rgba(239,68,68,0.15);
+    border: 1px solid rgba(239,68,68,0.3);
+    color: #f87171;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.stream-go-live-btn:hover:not(:disabled) { background: rgba(239,68,68,0.3); }
+.stream-go-live-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.stream-live-indicator {
+    font-size: 13px;
+    font-weight: 600;
+    color: #f87171;
+}
+
+.stream-stop-btn {
+    background: rgba(239,68,68,0.2);
+    border: 1px solid rgba(239,68,68,0.35);
+    color: #f87171;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.stream-stop-btn:hover { background: rgba(239,68,68,0.35); }
+
+.stream-error {
+    font-size: 12px;
+    color: #f87171;
+}
+</style>

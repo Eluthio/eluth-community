@@ -42,10 +42,12 @@
                         <path d="M1 5 Q2.5 1 4 5 Q5.5 9 7 5 Q8.5 1 10 5 Q11.5 9 13 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>
                     </svg>
                     <span v-else-if="channel.type === 'announcement'" class="ch-icon">📢</span>
+                    <span v-else-if="channel.type === 'stream'" class="ch-icon">📺</span>
                     <span v-else class="channel-type-dot" />
                     <span class="truncate">{{ channel.name }}</span>
+                    <span v-if="channel.is_live" class="ch-live-badge">LIVE</span>
                     <span
-                        v-if="unreadByChannel[channel.id]?.mentions > 0"
+                        v-else-if="unreadByChannel[channel.id]?.mentions > 0"
                         class="ch-badge ch-badge--mention"
                     >{{ unreadByChannel[channel.id].mentions > 9 ? '9+' : unreadByChannel[channel.id].mentions }}</span>
                     <span
@@ -145,3 +147,17 @@ onUnmounted(() => {
 })
 function onEsc(e) { if (e.key === 'Escape') closeServerMenu() }
 </script>
+
+<style scoped>
+.ch-live-badge {
+    margin-left: auto;
+    background: #ef4444;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    padding: 1px 5px;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+</style>

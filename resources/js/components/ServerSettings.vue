@@ -220,6 +220,7 @@
                                 <option value="text">Text</option>
                                 <option value="announcement">Announcement</option>
                                 <option value="voice">Voice</option>
+                                <option value="stream">Stream</option>
                             </select>
                             <button class="settings-btn-primary" @click="saveNewChannel(section.id)">Add</button>
                             <button class="settings-btn-ghost" @click="addingChannelToSection = null">Cancel</button>
@@ -230,6 +231,7 @@
                                 <span class="settings-channel-icon">
                                     <span v-if="channel.type === 'announcement'">📢</span>
                                     <span v-else-if="channel.type === 'voice'">🔊</span>
+                                    <span v-else-if="channel.type === 'stream'">📺</span>
                                     <span v-else>#</span>
                                 </span>
                                 <span class="settings-channel-name">{{ channel.name }}</span>
@@ -254,6 +256,7 @@
                                             <option value="text">Text</option>
                                             <option value="announcement">Announcement</option>
                                             <option value="voice">Voice</option>
+                                            <option value="stream">Stream</option>
                                         </select>
                                     </div>
                                     <div style="flex:1;">
