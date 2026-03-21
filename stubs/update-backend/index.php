@@ -67,8 +67,9 @@ if ($act && $act !== 'login' && $act !== 'logout') {
     streamHeader($act);
     match ($act) {
         'download'     => actionDownload(),
-        'backup_db'    => actionBackupDb(),
-        'backup_files' => actionBackupFiles(),
+        'backup'       => actionBackup(),
+        'backup_db'    => actionBackup(),   // legacy alias
+        'backup_files' => actionBackup(),   // legacy alias
         'install'      => actionInstall(),
         'migrate'      => actionMigrate(),
         'cleanup'      => actionCleanup(),
@@ -151,13 +152,13 @@ function actionDownload(): void
     log_line('NEXT:preflight');
 }
 
-function actionBackupDb(): void
+function actionBackup(): void
 {
     global $cfg;
     $ver = $_SESSION['pending_version'] ?? 'unknown';
     $ts  = date('Ymd-His');
-    $out = UPD_STOR . "/db-{$ver}-{$ts}.sql";
 
+    // ── 1. Database dump ──────────────────────────────────────────────────────
     log_line('Connecting to database…');
     try {
         $pdo = new PDO(
@@ -171,8 +172,9 @@ function actionBackupDb(): void
         return;
     }
 
+    $dbOut = UPD_STOR . "/db-{$ver}-{$ts}.sql";
     log_line('Dumping database…');
-    $fh = fopen($out, 'w');
+    $fh = fopen($dbOut, 'w');
     fwrite($fh, "-- Eluth Community Server Database Backup\n");
     fwrite($fh, "-- Version: {$ver}\n");
     fwrite($fh, "-- Generated: " . date('Y-m-d H:i:s') . "\n\n");
@@ -181,19 +183,14 @@ function actionBackupDb(): void
     fwrite($fh, "SET CHARACTER_SET_CLIENT=utf8mb4;\n\n");
 
     $tables = $pdo->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
-
     foreach ($tables as $table) {
         log_line("  — {$table}");
-
         $create = $pdo->query("SHOW CREATE TABLE `{$table}`")->fetch(PDO::FETCH_NUM);
         fwrite($fh, "DROP TABLE IF EXISTS `{$table}`;\n");
         fwrite($fh, $create[1] . ";\n\n");
-
         $count = (int) $pdo->query("SELECT COUNT(*) FROM `{$table}`")->fetchColumn();
-        $batch = 500;
-
-        for ($offset = 0; $offset < $count; $offset += $batch) {
-            $rows = $pdo->query("SELECT * FROM `{$table}` LIMIT {$batch} OFFSET {$offset}")->fetchAll(PDO::FETCH_ASSOC);
+        for ($offset = 0; $offset < $count; $offset += 500) {
+            $rows = $pdo->query("SELECT * FROM `{$table}` LIMIT 500 OFFSET {$offset}")->fetchAll(PDO::FETCH_ASSOC);
             foreach ($rows as $row) {
                 $vals = array_map(fn($v) => $v === null ? 'NULL' : $pdo->quote((string)$v), $row);
                 fwrite($fh, "INSERT INTO `{$table}` VALUES (" . implode(',', $vals) . ");\n");
@@ -201,21 +198,12 @@ function actionBackupDb(): void
         }
         fwrite($fh, "\n");
     }
-
     fwrite($fh, "SET FOREIGN_KEY_CHECKS=1;\n");
     fclose($fh);
+    log_line('✓ Database dump saved (' . formatBytes(filesize($dbOut)) . ').');
 
-    log_line('✓ Database dump saved (' . formatBytes(filesize($out)) . ').');
-    log_line('NEXT:backup_files');
-}
-
-function actionBackupFiles(): void
-{
-    $ver = $_SESSION['pending_version'] ?? 'unknown';
-    $ts  = date('Ymd-His');
-    $out = UPD_STOR . "/site-{$ver}-{$ts}.zip";
-
-    // Directories to exclude from the backup
+    // ── 2. Site file backup ───────────────────────────────────────────────────
+    $siteOut = UPD_STOR . "/site-{$ver}-{$ts}.zip";
     $exclude = [
         UPD_STOR,
         BASE . '/node_modules',
@@ -226,25 +214,19 @@ function actionBackupFiles(): void
     ];
 
     log_line('Creating site backup zip…');
-
     $zip  = new ZipArchive();
-    $zip->open($out, ZipArchive::CREATE);
+    $zip->open($siteOut, ZipArchive::CREATE);
     $iter = new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator(BASE, FilesystemIterator::SKIP_DOTS),
         RecursiveIteratorIterator::SELF_FIRST
     );
-
     $count = 0;
     foreach ($iter as $file) {
         $path = $file->getPathname();
-
-        // Skip excluded paths
         foreach ($exclude as $ex) {
             if (str_starts_with($path, $ex)) continue 2;
         }
-
         $rel = str_replace(BASE . DIRECTORY_SEPARATOR, '', $path);
-
         if ($file->isDir()) {
             $zip->addEmptyDir($rel);
         } else {
@@ -253,9 +235,9 @@ function actionBackupFiles(): void
             if ($count % 200 === 0) log_line("  — {$count} files…");
         }
     }
-
     $zip->close();
-    log_line("✓ Site backup complete — {$count} files, " . formatBytes(filesize($out)) . '.');
+    log_line("✓ Site backup complete — {$count} files, " . formatBytes(filesize($siteOut)) . '.');
+
     log_line('NEXT:install');
 }
 
@@ -798,7 +780,7 @@ function pageBackup(): void
         <div>2. Site archive  → <code>storage/updates/site-{ver}-{timestamp}.zip</code></div>
     </div>
     <div class="action-bar">
-        <button class="btn btn--primary" onclick="runAction('backup_db')">Start Backup</button>
+        <button class="btn btn--primary" onclick="runAction('backup')">Start Backup</button>
     </div>
     <div id="log" class="log-box" style="display:none"></div>
     <?php
@@ -856,7 +838,7 @@ function pageRollback(): void
 // ── HTML shell ────────────────────────────────────────────────────────────────
 function streamHeader(string $act): void
 {
-    $titles = ['download'=>'Downloading…','backup_db'=>'Backing up database…','backup_files'=>'Backing up files…','install'=>'Installing…','migrate'=>'Running migrations…','cleanup'=>'Finishing up…','rollback'=>'Rolling back…','delete_backup'=>'Deleting backup…'];
+    $titles = ['download'=>'Downloading…','backup'=>'Backing up…','backup_db'=>'Backing up…','backup_files'=>'Backing up…','install'=>'Installing…','migrate'=>'Running migrations…','cleanup'=>'Finishing up…','rollback'=>'Rolling back…','delete_backup'=>'Deleting backup…'];
     $label  = $titles[$act] ?? 'Working…';
     $steps  = ['status'=>'Status','download'=>'Download Update','preflight'=>'Preflight Check','backup'=>'Backup','install'=>'Install','rollback'=>'Rollback'];
     html_head($label);
