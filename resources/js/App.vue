@@ -163,6 +163,7 @@
                 :token="authToken"
                 :central-token="authToken"
                 :current-username="currentUser.username"
+                :current-user-id="currentUser.id"
                 :open-with="dmOpenWith"
                 :open-with-conv-id="dmOpenWithConvId"
                 :central-echo="centralEcho"
@@ -383,6 +384,34 @@ async function animateAppIn() {
     gsap.from('#main',   { opacity: 0,         duration: 0.45, delay: 0.18, ease: 'power3.out' })
 }
 
+let _refreshTimer = null
+
+function scheduleRefresh(expUnix) {
+    if (_refreshTimer) clearTimeout(_refreshTimer)
+    const msUntilRefresh = Math.max(0, (expUnix - Math.floor(Date.now() / 1000) - 60) * 1000)
+    _refreshTimer = setTimeout(tryRefresh, msUntilRefresh)
+}
+
+async function tryRefresh() {
+    try {
+        const res = await fetch(centralUrl.value + '/api/auth/refresh', {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+        })
+        if (!res.ok) throw new Error('refresh failed')
+        const data = await res.json()
+        if (data.token) {
+            const payload = JSON.parse(atob(data.token.split('.')[1]))
+            localStorage.setItem('eluth_token', data.token)
+            authToken.value = data.token
+            scheduleRefresh(payload.exp)
+        }
+    } catch {
+        // Fall back to silent OAuth check
+        startSilentCheck()
+    }
+}
+
 async function handleTokenReceived(token) {
     const payload = JSON.parse(atob(token.split('.')[1]))
     currentUser.value = { id: payload.sub, username: payload.username ?? 'User' }
@@ -390,6 +419,7 @@ async function handleTokenReceived(token) {
     authToken.value     = token
     authenticated.value = true
     centralEcho.value = createCentralEcho(token, (newEcho) => { centralEcho.value = newEcho })
+    scheduleRefresh(payload.exp)
     requestNotificationPermission()
     await loadAll()
     animateAppIn()
@@ -476,6 +506,7 @@ function openLoginPopup() {
 }
 
 async function signOut() {
+    if (_refreshTimer) { clearTimeout(_refreshTimer); _refreshTimer = null }
     stopHeartbeat()
     stopPolling()
     await post('/members/presence', { presence: 'offline' }).catch(() => {})
@@ -1035,12 +1066,14 @@ onMounted(async () => {
     if (stored) {
         try {
             const payload = JSON.parse(atob(stored.split('.')[1]))
-            if (payload.exp && payload.exp > Math.floor(Date.now() / 1000)) {
+            const now = Math.floor(Date.now() / 1000)
+            if (payload.exp && payload.exp > now) {
                 currentUser.value   = { id: payload.sub, username: payload.username ?? 'User' }
                 jwtFeatures.value   = Array.isArray(payload.features) ? payload.features : []
                 authToken.value     = stored
                 authenticated.value = true
                 centralEcho.value = createCentralEcho(stored, (newEcho) => { centralEcho.value = newEcho })
+                scheduleRefresh(payload.exp)
                 requestNotificationPermission()
                 await loadAll()
                 animateAppIn()

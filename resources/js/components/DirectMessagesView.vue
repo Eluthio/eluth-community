@@ -47,15 +47,43 @@
         <!-- Right area: thread or placeholder -->
         <div class="dm-view-thread">
 
+            <!-- E2EE unlock prompt -->
+            <div v-if="!e2eeReady && !showUnlock" class="dm-e2ee-lock">
+                <div class="dm-e2ee-lock-icon">🔒</div>
+                <div class="dm-e2ee-lock-title">Messages are end-to-end encrypted</div>
+                <div class="dm-e2ee-lock-hint">Enter your Eluth password to unlock your messages for this session.</div>
+                <button class="dm-e2ee-unlock-btn" @click="showUnlock = true">Unlock</button>
+            </div>
+
+            <div v-else-if="showUnlock" class="dm-e2ee-lock">
+                <div class="dm-e2ee-lock-icon">🔒</div>
+                <div class="dm-e2ee-lock-title">Enter your password</div>
+                <input
+                    class="dm-e2ee-passphrase"
+                    type="password"
+                    placeholder="Your Eluth password"
+                    v-model="unlockPassphrase"
+                    @keydown.enter.prevent="unlockE2ee"
+                    autofocus
+                />
+                <div v-if="unlockError" class="dm-e2ee-error">{{ unlockError }}</div>
+                <div class="dm-e2ee-lock-btns">
+                    <button class="dm-e2ee-unlock-btn" :disabled="unlocking" @click="unlockE2ee">
+                        {{ unlocking ? 'Unlocking…' : 'Unlock' }}
+                    </button>
+                    <button class="dm-e2ee-skip-btn" @click="skipE2ee">Use without encryption</button>
+                </div>
+            </div>
+
             <!-- No conversation selected -->
-            <div v-if="!activeConv" class="dm-view-placeholder">
+            <div v-else-if="!activeConv" class="dm-view-placeholder">
                 <div class="dm-view-placeholder-icon">✉</div>
                 <div class="dm-view-placeholder-title">Your Direct Messages</div>
                 <div class="dm-view-placeholder-hint">Select a conversation or right-click a user to start one.</div>
             </div>
 
-            <!-- Active conversation -->
-            <template v-else>
+            <!-- Active conversation (only shown once E2EE is resolved) -->
+            <template v-else-if="e2eeReady || e2eeSkipped">
                 <!-- Call panel — shown above chat when there's an active call for this conversation -->
                 <VoiceCall
                     v-if="activeCall && activeCall.convId === activeConv.id && centralToken && centralEcho"
@@ -91,8 +119,13 @@
                         :class="{ 'dm-msg--mine': msg.author === currentUsername }"
                     >
                         <div v-if="msg.author !== currentUsername" class="dm-msg-author">{{ msg.author }}</div>
-                        <div class="dm-msg-bubble">{{ msg.content }}</div>
-                        <div class="dm-msg-time">{{ formatTime(msg.at) }}</div>
+                        <div class="dm-msg-bubble" :class="{ 'dm-msg-bubble--encrypted': msg._decryptFailed }">
+                            {{ msg._plaintext ?? msg.content }}
+                        </div>
+                        <div class="dm-msg-time">
+                            {{ formatTime(msg.at) }}
+                            <span v-if="msg.encrypted" class="dm-msg-e2ee" title="End-to-end encrypted">🔒</span>
+                        </div>
                     </div>
                 </div>
 
@@ -116,15 +149,17 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import VoiceCall from './VoiceCall.vue'
+import { useE2ee } from '../composables/useE2ee.js'
 
 const props = defineProps({
     centralUrl:      { type: String, required: true },
     token:           { type: String, required: true },
     currentUsername: { type: String, default: '' },
-    openWith:        { type: Object, default: null },   // { id, username } to open immediately
-    openWithConvId:  { type: String, default: null },   // open by conversation ID (e.g. when answering a call)
+    currentUserId:   { type: String, default: '' },
+    openWith:        { type: Object, default: null },
+    openWithConvId:  { type: String, default: null },
     centralEcho:     { type: Object, default: null },
-    activeCall:      { type: Object, default: null },   // { convId, remoteName, video, isCaller, remoteOffer }
+    activeCall:      { type: Object, default: null },
     centralToken:    { type: String, default: null },
     localName:       { type: String, default: 'You' },
 })
@@ -137,6 +172,53 @@ const draft         = ref('')
 const search        = ref('')
 const messagesEl    = ref(null)
 const inputEl       = ref(null)
+
+// ── E2EE ──────────────────────────────────────────────────────────────────
+const e2ee            = useE2ee()
+const e2eeReady       = ref(false)
+const e2eeSkipped     = ref(false)
+const showUnlock      = ref(false)
+const unlockPassphrase = ref('')
+const unlockError     = ref('')
+const unlocking       = ref(false)
+
+async function unlockE2ee() {
+    if (!unlockPassphrase.value) return
+    unlocking.value = true
+    unlockError.value = ''
+    try {
+        await e2ee.init(props.centralUrl, props.token, unlockPassphrase.value)
+        if (e2ee.isReady()) {
+            e2eeReady.value  = true
+            showUnlock.value = false
+            unlockPassphrase.value = ''
+            // Re-decrypt already-loaded messages
+            await decryptMessages(messages.value)
+        } else {
+            unlockError.value = 'Could not unlock. Check your password.'
+        }
+    } catch {
+        unlockError.value = 'Could not unlock. Check your password.'
+    } finally {
+        unlocking.value = false
+    }
+}
+
+function skipE2ee() {
+    e2eeSkipped.value = true
+    showUnlock.value  = false
+}
+
+async function decryptMessages(msgs) {
+    if (!e2ee.isReady()) return
+    for (const msg of msgs) {
+        if (msg.encrypted && !msg._plaintext) {
+            const plain = await e2ee.decrypt(msg.sender_id, props.centralUrl, props.token, msg.content)
+            msg._plaintext    = plain
+            msg._decryptFailed = plain.startsWith('[Encrypted message')
+        }
+    }
+}
 
 let echoChannel = null
 
@@ -199,6 +281,7 @@ async function loadMessages() {
     try {
         const data = await api('GET', '/dm/conversations/' + activeConv.value.id + '/messages')
         messages.value = data.messages
+        await decryptMessages(messages.value)
         await nextTick()
         scrollToBottom()
     } catch { /* silent */ }
@@ -209,14 +292,28 @@ async function sendMessage() {
     if (!content || !activeConv.value) return
     draft.value = ''
     nextTick(() => { if (inputEl.value) inputEl.value.style.height = 'auto' })
+
     try {
-        const msg = await api('POST', '/dm/conversations/' + activeConv.value.id + '/messages', { content })
+        const recipientId = activeConv.value.participant.id
+        let body = { content, encrypted: false }
+
+        if (e2ee.isReady() && recipientId) {
+            const ciphertext = await e2ee.encrypt(recipientId, props.centralUrl, props.token, content)
+            if (ciphertext) {
+                body = { content: ciphertext, encrypted: true }
+            }
+        }
+
+        const msg = await api('POST', '/dm/conversations/' + activeConv.value.id + '/messages', body)
+        // Store plaintext for immediate display — no need to decrypt our own sent message
+        msg._plaintext = content
         messages.value.push(msg)
         await nextTick()
         scrollToBottom()
-        // Update conversation preview
+
+        const preview = body.encrypted ? '🔒 Encrypted message' : content
         const idx = conversations.value.findIndex(c => c.id === activeConv.value.id)
-        if (idx !== -1) conversations.value[idx].last_message = { content, sender: props.currentUsername }
+        if (idx !== -1) conversations.value[idx].last_message = { content: preview, sender: props.currentUsername }
     } catch { /* silent */ }
 }
 
@@ -229,11 +326,12 @@ function subscribeToUserChannel() {
         const userId = JSON.parse(atob(props.token.split('.')[1])).sub
         echoChannel = echo.channel('user.' + userId)
             .listen('.dm.message.sent', async data => {
+                const preview = data.encrypted ? '🔒 Encrypted message' : data.content
+
                 // Update conversation preview
                 const idx = conversations.value.findIndex(c => c.id === data.conversation_id)
                 if (idx !== -1) {
-                    conversations.value[idx].last_message = { content: data.content, sender: data.author }
-                    // Move to top
+                    conversations.value[idx].last_message = { content: preview, sender: data.author }
                     const [conv] = conversations.value.splice(idx, 1)
                     conversations.value.unshift(conv)
                 } else {
@@ -242,12 +340,14 @@ function subscribeToUserChannel() {
 
                 if (activeConv.value?.id === data.conversation_id) {
                     if (!messages.value.some(m => m.id === data.id)) {
-                        messages.value.push({ id: data.id, author: data.author, content: data.content, at: data.at })
+                        const msg = { id: data.id, author: data.author, sender_id: data.sender_id, content: data.content, encrypted: !!data.encrypted, at: data.at }
+                        if (msg.encrypted) await decryptMessages([msg])
+                        messages.value.push(msg)
                         await nextTick()
                         scrollToBottom()
                     }
                 } else {
-                    emit('new-dm', { conversationId: data.conversation_id, author: data.author, content: data.content })
+                    emit('new-dm', { conversationId: data.conversation_id, author: data.author, content: preview })
                 }
             })
     } catch { /* no Echo */ }
@@ -324,4 +424,53 @@ defineExpose({ startDmWith })
     transition: opacity 0.15s, background 0.15s, transform 0.15s;
 }
 .dm-action-btn:hover { opacity: 1; background: rgba(255,255,255,0.08); transform: scale(1.2); }
+
+.dm-e2ee-lock {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 12px;
+    padding: 40px;
+    text-align: center;
+}
+.dm-e2ee-lock-icon { font-size: 40px; }
+.dm-e2ee-lock-title { font-size: 16px; font-weight: 600; opacity: 0.9; }
+.dm-e2ee-lock-hint { font-size: 13px; opacity: 0.5; max-width: 320px; line-height: 1.5; }
+.dm-e2ee-passphrase {
+    width: 280px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.06);
+    color: inherit;
+    font-size: 14px;
+}
+.dm-e2ee-error { font-size: 12px; color: #ff6b6b; }
+.dm-e2ee-lock-btns { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.dm-e2ee-unlock-btn {
+    padding: 8px 20px;
+    border-radius: 8px;
+    border: none;
+    background: #5865f2;
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: 500;
+}
+.dm-e2ee-unlock-btn:disabled { opacity: 0.5; cursor: default; }
+.dm-e2ee-skip-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: transparent;
+    color: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    opacity: 0.6;
+}
+.dm-e2ee-skip-btn:hover { opacity: 1; }
+.dm-msg-e2ee { font-size: 10px; opacity: 0.5; margin-left: 4px; }
+.dm-msg-bubble--encrypted { opacity: 0.6; font-style: italic; }
 </style>

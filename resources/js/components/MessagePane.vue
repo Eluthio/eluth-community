@@ -134,6 +134,7 @@
                 <GifPicker
                     v-if="enabledPlugins.includes('gif-picker')"
                     :settings="pluginSettings['gif-picker'] ?? {}"
+                    :auth-token="props.authToken"
                     @insert="insertGif"
                 />
                 <EmoticonPicker
@@ -432,7 +433,8 @@ function renderContent(content) {
     safe = safe.replace(/:([a-z0-9_-]{2,32}):/g, (match, name) => {
         const emote = emoteMap.value[name]
         if (!emote) return match
-        return `<img src="${emote.url}" class="msg-emote" alt=":${name}:" title=":${name}:" loading="lazy" />`
+        const safeUrl = emote.url.replace(/"/g, '&quot;')
+        return `<img src="${safeUrl}" class="msg-emote" alt=":${name}:" title=":${name}:" loading="lazy" />`
     })
 
     // Highlight @mentions

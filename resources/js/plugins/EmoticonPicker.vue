@@ -205,7 +205,7 @@ async function loadServerEmotes() {
     emotesLoading.value = true
     try {
         const base  = props.apiBase || (typeof window !== 'undefined' && window._eluthCommunityUrl) || ''
-        const token = props.authToken || (typeof localStorage !== 'undefined' ? (localStorage.getItem('eluth_token') ?? '') : '')
+        const token = props.authToken ?? ''
         const res   = await fetch(base + '/api/plugins/emoticons/emotes', {
             headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' },
         })

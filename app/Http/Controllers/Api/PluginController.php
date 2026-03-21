@@ -171,6 +171,11 @@ class PluginController extends Controller
         for ($i = 0; $i < $zip->numFiles; $i++) {
             $name    = $zip->getNameIndex($i);
             $content = $zip->getFromIndex($i);
+            // Reject path traversal attempts
+            if (str_contains($name, '..') || str_starts_with($name, '/')) {
+                $zip->close(); @unlink($tmpZip);
+                return response()->json(['message' => 'Plugin zip contains invalid file paths.'], 422);
+            }
             if ($content !== false && ! str_ends_with($name, '/')) {
                 \Storage::disk('public')->put($destDir . '/' . $name, $content);
             }

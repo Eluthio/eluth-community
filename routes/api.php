@@ -160,8 +160,10 @@ Route::middleware('auth.central')->group(function () {
 
     // Plugins
     Route::get('/plugins',                              [PluginController::class, 'index']);
-    Route::get('/plugins/gif-picker/search',            [PluginController::class, 'gifSearch']);
-    Route::get('/plugins/gif-picker/trending',          [PluginController::class, 'gifTrending']);
+    Route::middleware('throttle:60,1')->group(function () {
+        Route::get('/plugins/gif-picker/search',   [PluginController::class, 'gifSearch']);
+        Route::get('/plugins/gif-picker/trending', [PluginController::class, 'gifTrending']);
+    });
     Route::post('/admin/plugins/install',                [PluginController::class, 'install']);
     Route::post('/admin/plugins/{slug}/uninstall',      [PluginController::class, 'uninstall']);
     Route::post('/admin/plugins/{slug}/enable',         [PluginController::class, 'enable']);
