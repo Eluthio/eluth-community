@@ -131,17 +131,14 @@
                     @click="onCursorMove"
                     ref="inputEl"
                 />
-                <GifPicker
-                    v-if="enabledPlugins.includes('gif-picker')"
-                    :settings="pluginSettings['gif-picker'] ?? {}"
-                    :auth-token="props.authToken"
-                    @insert="insertGif"
-                />
-                <EmoticonPicker
-                    v-if="enabledPlugins.includes('emoticon-picker')"
+                <component
+                    v-for="plugin in activeInputPlugins"
+                    :key="plugin.slug"
+                    :is="plugin.component"
+                    :settings="pluginSettings[plugin.slug] ?? {}"
                     :api-base="props.apiBase"
                     :auth-token="props.authToken"
-                    @insert="insertEmote"
+                    @insert="insertFromPlugin"
                 />
             </div>
 
@@ -223,8 +220,7 @@
 import { ref, computed, watch, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { gsap } from 'gsap'
 import StreamPlayer from './StreamPlayer.vue'
-import GifPicker from '../plugins/GifPicker.vue'
-import EmoticonPicker from '../plugins/EmoticonPicker.vue'
+import { OFFICIAL_PLUGINS } from '../plugins/registry.js'
 
 const props = defineProps({
     channelName:   { type: String, default: 'general' },
@@ -676,25 +672,31 @@ onUnmounted(() => {
 })
 function onDocEsc(e) { if (e.key === 'Escape') { closeMenu(); closeMention() } }
 
-// ── GIF insert ────────────────────────────────────────────────────────────
+// ── Plugin input zone ─────────────────────────────────────────────────────
 const pendingGif = ref(null)
 
-function insertGif(url) {
-    pendingGif.value = url
-    nextTick(() => inputEl.value?.focus())
-}
+const activeInputPlugins = computed(() =>
+    props.enabledPlugins
+        .filter(slug => OFFICIAL_PLUGINS[slug]?.zones.includes('input'))
+        .map(slug => ({ slug, ...OFFICIAL_PLUGINS[slug] }))
+)
 
-function insertEmote(text) {
-    // For standard emoji (single char or multi-char sequence), insert at cursor
-    // For custom emotes (:name:), also insert at cursor
+// Single handler for all input-zone plugin @insert events.
+// GIF URLs start with http; everything else is inserted as text at cursor.
+function insertFromPlugin(value) {
+    if (typeof value === 'string' && (value.startsWith('http://') || value.startsWith('https://'))) {
+        pendingGif.value = value
+        nextTick(() => inputEl.value?.focus())
+        return
+    }
     const el     = inputEl.value
     const cursor = el?.selectionStart ?? draft.value.length
     const before = draft.value.substring(0, cursor)
     const after  = draft.value.substring(cursor)
     const spacer = before.length && !before.endsWith(' ') ? ' ' : ''
-    draft.value  = before + spacer + text + ' ' + after
+    draft.value  = before + spacer + value + ' ' + after
     nextTick(() => {
-        const pos = (before + spacer + text + ' ').length
+        const pos = (before + spacer + value + ' ').length
         el?.setSelectionRange(pos, pos)
         el?.focus()
     })
