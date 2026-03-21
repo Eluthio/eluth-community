@@ -82,10 +82,10 @@
                         @click="showJoinRequests = !showJoinRequests"
                     >{{ joinRequests.length }} pending</button>
                     <button class="topbar-btn" :class="{ active: showMembers }" title="Toggle members" @click="showMembers = !showMembers">👥</button>
-                    <button class="topbar-btn" :class="{ active: showDMs }" title="Direct Messages" @click="toggleDMs">
+                    <button v-if="jwtFeatures.includes('dms')" class="topbar-btn" :class="{ active: showDMs }" title="Direct Messages" @click="toggleDMs">
                         ✉<span v-if="dmUnread > 0" class="topbar-badge">{{ dmUnread > 9 ? '9+' : dmUnread }}</span>
                     </button>
-                    <button class="topbar-btn" :class="{ active: showFriends }" title="Friends" @click="showFriends = !showFriends; showDMs = false">♡</button>
+                    <button v-if="jwtFeatures.includes('friends')" class="topbar-btn" :class="{ active: showFriends }" title="Friends" @click="showFriends = !showFriends; showDMs = false">♡</button>
                     <button class="topbar-btn" title="Sign out" @click="signOut">⏻</button>
                 </div>
             </div>
@@ -155,7 +155,7 @@
 
             <!-- Full-screen DM view — spans both grid columns -->
             <DirectMessagesView
-                v-else
+                v-else-if="jwtFeatures.includes('dms')"
                 :central-url="centralUrl"
                 :token="authToken"
                 :central-token="authToken"
@@ -209,7 +209,7 @@
 
         <!-- Friends panel slide-in -->
         <Teleport to="body">
-            <div v-if="showFriends" class="side-panel-backdrop" @click="showFriends = false">
+            <div v-if="showFriends && jwtFeatures.includes('friends')" class="side-panel-backdrop" @click="showFriends = false">
                 <FriendsPanel
                     :central-url="centralUrl"
                     :token="authToken"
@@ -338,6 +338,7 @@ function dismissWelcome() {
 // ── Auth ───────────────────────────────────────────────────────────────────
 const authenticated = ref(false)
 const authToken     = ref('')
+const jwtFeatures   = ref([])   // features granted by central for this server (from JWT)
 const memberStatus  = ref(null)   // null | 'pending' | 'banned' | 'member'
 const currentUser   = ref({ id: '', username: '' })
 const currentMember      = ref(null)
@@ -378,6 +379,7 @@ async function animateAppIn() {
 async function handleTokenReceived(token) {
     const payload = JSON.parse(atob(token.split('.')[1]))
     currentUser.value = { id: payload.sub, username: payload.username ?? 'User' }
+    jwtFeatures.value = Array.isArray(payload.features) ? payload.features : []
     localStorage.setItem('eluth_token', token)
     authToken.value     = token
     authenticated.value = true
@@ -998,6 +1000,7 @@ onMounted(async () => {
             const payload = JSON.parse(atob(stored.split('.')[1]))
             if (payload.exp && payload.exp > Math.floor(Date.now() / 1000)) {
                 currentUser.value   = { id: payload.sub, username: payload.username ?? 'User' }
+                jwtFeatures.value   = Array.isArray(payload.features) ? payload.features : []
                 authToken.value     = stored
                 authenticated.value = true
                 centralEcho.value = createCentralEcho(stored, (newEcho) => { centralEcho.value = newEcho })
