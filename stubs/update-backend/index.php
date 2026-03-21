@@ -71,8 +71,6 @@ if ($act && $act !== 'login' && $act !== 'logout') {
         'backup_db'    => actionBackup(),   // legacy alias
         'backup_files' => actionBackup(),   // legacy alias
         'install'      => actionInstall(),
-        'migrate'      => actionMigrate(),
-        'cleanup'      => actionCleanup(),
         'rollback'     => actionRollback(),
         'delete_backup'=> actionDeleteBackup(),
         default        => log_line('Unknown action.'),
@@ -309,11 +307,8 @@ function actionInstall(): void
     }
 
     log_line("✓ {$copied} files installed, {$skipped} protected paths skipped.");
-    log_line('NEXT:migrate');
-}
 
-function actionMigrate(): void
-{
+    // ── Migrate ──────────────────────────────────────────────────────────────
     log_line('Running database migrations…');
 
     $autoload  = BASE . '/vendor/autoload.php';
@@ -340,32 +335,21 @@ function actionMigrate(): void
         return;
     }
 
-    log_line('NEXT:cleanup');
-}
-
-function actionCleanup(): void
-{
-    $ver = $_SESSION['pending_version'] ?? null;
-
+    // ── Cleanup ───────────────────────────────────────────────────────────────
     // Write new VERSION
     if ($ver) {
         file_put_contents(VER_FILE, $ver . PHP_EOL);
         log_line("Version file updated to {$ver}.");
     }
 
-    // Clear Laravel caches
+    // Clear Laravel caches (reuse existing $kernel)
     log_line('Clearing application caches…');
     try {
-        chdir(BASE);
-        require_once BASE . '/vendor/autoload.php';
-        $app    = require BASE . '/bootstrap/app.php';
-        $kernel = $app->make(\Illuminate\Contracts\Console\Kernel::class);
         $kernel->call('optimize:clear');
         $kernel->call('optimize');
         log_line('✓ Caches cleared and rebuilt.');
     } catch (\Throwable $e) {
-        log_line('Warning: Could not clear caches automatically: ' . $e->getMessage());
-        log_line('Run: php artisan optimize:clear && php artisan optimize');
+        log_line('Warning: Could not clear caches: ' . $e->getMessage());
     }
 
     // Remove staging folder
