@@ -20,15 +20,39 @@
                     <div v-if="props.canStream" class="stream-offline-hint">Click Go Live below to start streaming</div>
                 </div>
 
+                <!-- Source picker modal -->
+                <Teleport to="body">
+                    <div v-if="showSourcePicker" class="stream-source-overlay" @click.self="showSourcePicker = false">
+                        <div class="stream-source-modal">
+                            <div class="stream-source-title">Choose stream source</div>
+                            <div class="stream-source-options">
+                                <button class="stream-source-opt" @click="beginStream('display')">
+                                    <span class="stream-source-icon">🖥️</span>
+                                    <span class="stream-source-label">Desktop / Window</span>
+                                    <span class="stream-source-desc">Share your screen or an app window</span>
+                                </button>
+                                <button class="stream-source-opt" @click="beginStream('camera')">
+                                    <span class="stream-source-icon">📷</span>
+                                    <span class="stream-source-label">Webcam / Virtual Camera</span>
+                                    <span class="stream-source-desc">Use a webcam or OBS virtual camera</span>
+                                </button>
+                            </div>
+                            <button class="stream-source-cancel" @click="showSourcePicker = false">Cancel</button>
+                        </div>
+                    </div>
+                </Teleport>
+
                 <!-- Streamer controls: shown to the user who has stream permission -->
                 <div v-if="props.canStream" class="stream-controls">
                     <template v-if="!isStreaming">
-                        <button class="stream-go-live-btn" @click="startStream" :disabled="streamStarting || props.channel.is_live">
+                        <button class="stream-go-live-btn" @click="openSourcePicker" :disabled="streamStarting || props.channel.is_live">
                             {{ streamStarting ? 'Starting…' : props.channel.is_live ? 'Channel is live' : '🔴 Go Live' }}
                         </button>
                         <div v-if="streamError" class="stream-error">{{ streamError }}</div>
                     </template>
                     <template v-else>
+                        <!-- Local preview for streamer -->
+                        <video ref="previewEl" class="stream-preview-local" autoplay muted playsinline />
                         <div class="stream-live-indicator">🔴 You are live · {{ streamDuration }}</div>
                         <button class="stream-stop-btn" @click="stopStream">⏹ Stop Stream</button>
                     </template>
@@ -207,10 +231,12 @@ const messagesEl = ref(null)
 const inputEl    = ref(null)
 
 // ── Streaming ──────────────────────────────────────────────────────────────
-const isStreaming    = ref(false)
-const streamStarting = ref(false)
-const streamError    = ref('')
-const streamDuration = ref('0:00')
+const isStreaming     = ref(false)
+const streamStarting  = ref(false)
+const streamError     = ref('')
+const streamDuration  = ref('0:00')
+const showSourcePicker = ref(false)
+const previewEl       = ref(null)
 
 let mediaRecorder  = null
 let mediaStream    = null
@@ -225,16 +251,33 @@ function updateStreamDuration() {
     streamDuration.value = `${m}:${String(s).padStart(2, '0')}`
 }
 
-async function startStream() {
+function openSourcePicker() {
+    streamError.value = ''
+    showSourcePicker.value = true
+}
+
+async function beginStream(source) {
+    showSourcePicker.value = false
+    startStream(source)
+}
+
+async function startStream(source = 'display') {
     streamError.value = ''
     streamStarting.value = true
 
     try {
-        // Capture display + system audio
-        mediaStream = await navigator.mediaDevices.getDisplayMedia({
-            video: { frameRate: { ideal: 30, max: 60 } },
-            audio: true,
-        })
+        if (source === 'camera') {
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+                video: true,
+                audio: true,
+            })
+        } else {
+            // Capture display + system audio
+            mediaStream = await navigator.mediaDevices.getDisplayMedia({
+                video: { frameRate: { ideal: 30, max: 60 } },
+                audio: true,
+            })
+        }
 
         // Pick best supported mimeType
         const candidates = [
@@ -262,6 +305,10 @@ async function startStream() {
         isStreaming.value = true
         streamStartTs = Date.now()
         streamTimer = setInterval(updateStreamDuration, 1000)
+
+        // Show local preview (nextTick so the <video> ref is mounted)
+        await nextTick()
+        if (previewEl.value) previewEl.value.srcObject = mediaStream
 
         mediaRecorder = new MediaRecorder(mediaStream, { mimeType, timeslice: 4000 })
 
@@ -291,7 +338,7 @@ async function startStream() {
         mediaRecorder.start(4000)
     } catch (e) {
         streamError.value = e.name === 'NotAllowedError'
-            ? 'Screen share was cancelled.'
+            ? 'Permission denied. Allow camera/screen access and try again.'
             : (e.message ?? 'Could not start stream.')
         mediaStream?.getTracks().forEach(t => t.stop())
         mediaStream = null
@@ -305,6 +352,7 @@ async function stopStream() {
     clearInterval(streamTimer)
     streamDuration.value = '0:00'
 
+    if (previewEl.value) previewEl.value.srcObject = null
     mediaRecorder?.stop()
     mediaRecorder = null
 
@@ -748,5 +796,101 @@ watch(() => props.messages.length, async () => {
 .stream-error {
     font-size: 12px;
     color: #f87171;
+}
+
+/* Source picker modal */
+.stream-source-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+}
+
+.stream-source-modal {
+    background: var(--bg-secondary, #2b2d31);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 24px;
+    width: 340px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.stream-source-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #e2e8f0;
+    text-align: center;
+}
+
+.stream-source-options {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.stream-source-opt {
+    display: grid;
+    grid-template-columns: 36px 1fr;
+    grid-template-rows: auto auto;
+    column-gap: 10px;
+    align-items: start;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 12px 14px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s, border-color 0.15s;
+}
+.stream-source-opt:hover {
+    background: rgba(255,255,255,0.09);
+    border-color: var(--accent, #5865f2);
+}
+
+.stream-source-icon {
+    grid-row: 1 / 3;
+    font-size: 22px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    padding-top: 2px;
+}
+
+.stream-source-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e2e8f0;
+}
+
+.stream-source-desc {
+    font-size: 11px;
+    color: rgba(255,255,255,0.45);
+    margin-top: 2px;
+}
+
+.stream-source-cancel {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    color: rgba(255,255,255,0.5);
+    padding: 7px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.stream-source-cancel:hover { background: rgba(255,255,255,0.06); }
+
+.stream-preview-local {
+    width: 100%;
+    max-height: 200px;
+    background: #000;
+    border-radius: 6px;
+    object-fit: contain;
+    display: block;
 }
 </style>

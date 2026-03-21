@@ -161,6 +161,8 @@ Route::middleware('auth.central')->group(function () {
     Route::get('/plugins',                              [PluginController::class, 'index']);
     Route::get('/plugins/gif-picker/search',            [PluginController::class, 'gifSearch']);
     Route::get('/plugins/gif-picker/trending',          [PluginController::class, 'gifTrending']);
+    Route::post('/admin/plugins/install',                [PluginController::class, 'install']);
+    Route::post('/admin/plugins/{slug}/uninstall',      [PluginController::class, 'uninstall']);
     Route::post('/admin/plugins/{slug}/enable',         [PluginController::class, 'enable']);
     Route::post('/admin/plugins/{slug}/disable',        [PluginController::class, 'disable']);
     Route::post('/admin/plugins/{slug}/settings',       [PluginController::class, 'updateSettings']);

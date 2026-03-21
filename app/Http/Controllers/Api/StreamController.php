@@ -46,7 +46,7 @@ class StreamController extends Controller
             'is_live'               => true,
             'live_streamer_username' => $username,
             'live_started_at'       => now(),
-            'stream_seq'            => -1,
+            'stream_seq'            => 0,
         ]);
 
         broadcast(new ChannelLiveStarted($channel->id, $username))->toOthers();

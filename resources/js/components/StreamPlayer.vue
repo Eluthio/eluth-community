@@ -195,17 +195,12 @@ async function initMse(initialMimeType, initialLatestSeq) {
     mimeType       = initialMimeType
     latestSeqKnown = initialLatestSeq
 
-    // If stream just started (no chunks yet), wait for first chunk
-    if (latestSeqKnown < 0) {
-        buffering.value = true
-        return
-    }
-
-    // Start viewer near the live edge — load init chunk (0) then jump to recent
-    const LOOKBACK = 5   // fetch this many chunks before live edge for buffering
     nextSeqToFetch = 0   // always start with chunk-0 (contains WebM init data)
 
-    if (latestSeqKnown > LOOKBACK + 1) {
+    // If the stream just started and has no chunks yet, MSE is still set up —
+    // pumpChunks will simply wait (nextSeqToFetch > latestSeqKnown) until
+    // pollState finds a chunk and calls pumpChunks again with an updated seq.
+    if (latestSeqKnown > 5) {
         catchingUp.value = true
     }
 

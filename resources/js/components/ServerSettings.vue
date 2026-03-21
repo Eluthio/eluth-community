@@ -184,6 +184,25 @@
 
                 <!-- Plugins -->
                 <div v-else-if="panel === 'plugins'" class="settings-panel">
+                    <!-- Install new plugin -->
+                    <div class="settings-section">
+                        <label class="settings-label">Install Plugin</label>
+                        <div class="settings-inline-form">
+                            <input
+                                class="settings-input"
+                                v-model="installUrl"
+                                placeholder="GitHub release URL (.zip)"
+                                :disabled="installing"
+                            />
+                            <button class="settings-btn-primary" @click="installPlugin" :disabled="installing || !installUrl.trim()">
+                                {{ installing ? 'Installing…' : 'Install' }}
+                            </button>
+                        </div>
+                        <div v-if="installError" class="settings-error" style="margin-top:6px;">{{ installError }}</div>
+                        <div v-if="installSuccess" class="settings-saved" style="margin-top:6px;">{{ installSuccess }}</div>
+                        <div class="settings-hint" style="margin-top:6px;">Paste a GitHub release .zip URL. Approved plugins are verified with Eluth. <a href="https://eluth.io/developers" target="_blank" style="color:var(--accent)">Plugin docs →</a></div>
+                    </div>
+
                     <div v-if="pluginsLoading" class="settings-hint">Loading plugins…</div>
                     <div v-else-if="pluginsList.length === 0" class="settings-hint">No plugins available.</div>
                     <div v-else class="settings-plugin-list">
@@ -205,6 +224,12 @@
                                         v-else
                                         @click="disablePlugin(plugin)"
                                     >Disable</button>
+                                    <button
+                                        v-if="plugin.tier !== 'official'"
+                                        class="settings-btn-ghost settings-btn-danger"
+                                        @click="uninstallPlugin(plugin)"
+                                        style="margin-left:6px;"
+                                    >Uninstall</button>
                                 </div>
                             </div>
 
@@ -954,6 +979,10 @@ const pluginsLoading        = ref(false)
 const pluginSettingValues   = ref({})   // keyed as 'slug.key'
 const savingPluginSettings  = ref({})   // { slug: bool }
 const savedPluginSettings   = ref({})   // { slug: bool }
+const installUrl            = ref('')
+const installing            = ref(false)
+const installError          = ref('')
+const installSuccess        = ref('')
 
 async function loadPlugins() {
     pluginsLoading.value = true
@@ -993,6 +1022,32 @@ async function savePluginSettings(plugin) {
     savingPluginSettings.value[plugin.slug] = false
     savedPluginSettings.value[plugin.slug] = true
     setTimeout(() => { savedPluginSettings.value[plugin.slug] = false }, 2000)
+}
+
+async function installPlugin() {
+    installError.value   = ''
+    installSuccess.value = ''
+    installing.value     = true
+    try {
+        const data = await post('/admin/plugins/install', { url: installUrl.value.trim() })
+        installSuccess.value = `"${data.name}" installed successfully. Enable it below.`
+        installUrl.value = ''
+        await loadPlugins()
+    } catch (e) {
+        installError.value = e.message ?? 'Installation failed.'
+    } finally {
+        installing.value = false
+    }
+}
+
+async function uninstallPlugin(plugin) {
+    if (! confirm(`Uninstall "${plugin.name}"? This cannot be undone.`)) return
+    try {
+        await post('/admin/plugins/' + plugin.slug + '/uninstall', {})
+        await loadPlugins()
+    } catch (e) {
+        alert('Uninstall failed: ' + (e.message ?? 'Unknown error'))
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

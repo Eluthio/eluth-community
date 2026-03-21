@@ -101,6 +101,149 @@ class PluginController extends Controller
         return response()->json(['ok' => true]);
     }
 
+    public function install(Request $request): JsonResponse
+    {
+        $member = $request->attributes->get('member');
+        if (! $member?->isAdmin()) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        $url = $request->input('url', '');
+        if (! filter_var($url, FILTER_VALIDATE_URL)) {
+            return response()->json(['message' => 'Invalid URL.'], 422);
+        }
+
+        // Download the zip
+        $tmpZip = tempnam(sys_get_temp_dir(), 'eluth_plugin_') . '.zip';
+        try {
+            $response = \Http::timeout(30)->get($url);
+            if (! $response->ok()) {
+                return response()->json(['message' => 'Could not download plugin zip.'], 422);
+            }
+            file_put_contents($tmpZip, $response->body());
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'Download failed: ' . $e->getMessage()], 422);
+        }
+
+        // Extract and validate plugin.json
+        $zip = new \ZipArchive();
+        if ($zip->open($tmpZip) !== true) {
+            @unlink($tmpZip);
+            return response()->json(['message' => 'Not a valid zip file.'], 422);
+        }
+
+        $manifestJson = $zip->getFromName('plugin.json');
+        if ($manifestJson === false) {
+            $zip->close(); @unlink($tmpZip);
+            return response()->json(['message' => 'plugin.json not found in zip.'], 422);
+        }
+
+        $manifest = json_decode($manifestJson, true);
+        if (! $manifest) {
+            $zip->close(); @unlink($tmpZip);
+            return response()->json(['message' => 'plugin.json is not valid JSON.'], 422);
+        }
+
+        // Required fields
+        foreach (['name', 'slug', 'version', 'tier', 'entry', 'zones'] as $field) {
+            if (empty($manifest[$field])) {
+                $zip->close(); @unlink($tmpZip);
+                return response()->json(['message' => "plugin.json missing required field: {$field}"], 422);
+            }
+        }
+
+        $slug = preg_replace('/[^a-z0-9\-]/', '', strtolower($manifest['slug']));
+        $tier = $manifest['tier'];
+
+        // Prevent overriding official plugins
+        if (array_key_exists($slug, self::OFFICIAL_PLUGINS)) {
+            $zip->close(); @unlink($tmpZip);
+            return response()->json(['message' => 'Cannot install over a built-in official plugin.'], 422);
+        }
+
+        if (! in_array($tier, ['approved', 'unofficial'])) {
+            $zip->close(); @unlink($tmpZip);
+            return response()->json(['message' => 'Only approved or unofficial plugins can be installed.'], 422);
+        }
+
+        // Verify Tier 2 key with central
+        if ($tier === 'approved') {
+            $eluthKey = $manifest['eluth_key'] ?? '';
+            if (! $eluthKey) {
+                $zip->close(); @unlink($tmpZip);
+                return response()->json(['message' => 'Approved plugins must have an eluth_key.'], 422);
+            }
+            $centralUrl = config('services.central.url', '');
+            try {
+                $verify = \Http::timeout(6)->post($centralUrl . '/api/plugins/verify', [
+                    'slug'      => $slug,
+                    'eluth_key' => $eluthKey,
+                    'manifest'  => $manifest,
+                ]);
+                if (! $verify->ok() || ! $verify->json('valid')) {
+                    $zip->close(); @unlink($tmpZip);
+                    return response()->json(['message' => 'Plugin key verification failed. This plugin has not been approved by Eluth.'], 422);
+                }
+            } catch (\Throwable) {
+                $zip->close(); @unlink($tmpZip);
+                return response()->json(['message' => 'Could not verify plugin with Eluth central server.'], 422);
+            }
+        }
+
+        // Extract all files to storage
+        $destDir = 'plugins/' . $slug;
+        \Storage::disk('public')->makeDirectory($destDir);
+
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $name    = $zip->getNameIndex($i);
+            $content = $zip->getFromIndex($i);
+            if ($content !== false && ! str_ends_with($name, '/')) {
+                \Storage::disk('public')->put($destDir . '/' . $name, $content);
+            }
+        }
+        $zip->close();
+        @unlink($tmpZip);
+
+        // Upsert plugin record
+        Plugin::updateOrCreate(['slug' => $slug], [
+            'name'       => $manifest['name'],
+            'tier'       => $tier,
+            'manifest'   => array_merge($manifest, ['version' => $manifest['version']]),
+            'source_url' => $url,
+            'is_enabled' => false,
+        ]);
+
+        return response()->json(['ok' => true, 'slug' => $slug, 'name' => $manifest['name']]);
+    }
+
+    public function uninstall(Request $request, string $slug): JsonResponse
+    {
+        $member = $request->attributes->get('member');
+        if (! $member?->isAdmin()) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        // Cannot uninstall official plugins
+        if (array_key_exists($slug, self::OFFICIAL_PLUGINS)) {
+            return response()->json(['message' => 'Cannot uninstall built-in plugins.'], 422);
+        }
+
+        $plugin = Plugin::find($slug);
+        if (! $plugin) {
+            return response()->json(['message' => 'Plugin not found.'], 404);
+        }
+
+        // Remove files
+        \Storage::disk('public')->deleteDirectory('plugins/' . $slug);
+
+        // Remove settings
+        \DB::table('server_settings')->where('key', 'like', 'plugin_' . $slug . '_%')->delete();
+
+        $plugin->delete();
+
+        return response()->json(['ok' => true]);
+    }
+
     // ── GIF Picker proxy ─────────────────────────────────────────────────────
 
     /**
