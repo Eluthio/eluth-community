@@ -45,7 +45,7 @@ if (($_POST['act'] ?? '') === 'logout') {
 if (($_POST['act'] ?? '') === 'login') {
     if ($password !== '' && hash_equals($password, $_POST['pw'] ?? '')) {
         $_SESSION['ub_auth'] = true;
-        header('Location: ?step=status');
+        header('Location: ?step=plugins');
         exit;
     }
     $loginError = 'Incorrect password.';
@@ -84,6 +84,130 @@ if (($_POST['act'] ?? '') === 'delete_backup') {
         if (file_exists($path)) unlink($path);
     }
     header('Location: ?step=status');
+    exit;
+}
+
+if (($_POST['act'] ?? '') === 'enable_plugin') {
+    $slug = preg_replace('/[^a-z0-9_-]/', '', $_POST['slug'] ?? '');
+    if ($slug) { try { getDB()->prepare("UPDATE plugins SET is_enabled=1, updated_at=NOW() WHERE slug=?")->execute([$slug]); } catch (\Throwable $e) {} }
+    header('Location: ?step=plugins&msg=' . urlencode('Plugin enabled.'));
+    exit;
+}
+
+if (($_POST['act'] ?? '') === 'disable_plugin') {
+    $slug = preg_replace('/[^a-z0-9_-]/', '', $_POST['slug'] ?? '');
+    if ($slug) { try { getDB()->prepare("UPDATE plugins SET is_enabled=0, updated_at=NOW() WHERE slug=?")->execute([$slug]); } catch (\Throwable $e) {} }
+    header('Location: ?step=plugins&msg=' . urlencode('Plugin disabled.'));
+    exit;
+}
+
+if (($_POST['act'] ?? '') === 'save_plugin_settings') {
+    $slug = preg_replace('/[^a-z0-9_-]/', '', $_POST['slug'] ?? '');
+    if ($slug) {
+        try {
+            $db = getDB();
+            foreach ($_POST as $k => $v) {
+                if (!str_starts_with($k, 'setting_')) continue;
+                $key = 'plugin_' . $slug . '_' . substr($k, 8);
+                $db->prepare("INSERT INTO server_settings (`key`, `value`, created_at, updated_at) VALUES (?, ?, NOW(), NOW()) ON DUPLICATE KEY UPDATE `value`=?, updated_at=NOW()")
+                   ->execute([$key, $v, $v]);
+            }
+        } catch (\Throwable $e) {}
+    }
+    header('Location: ?step=plugins&msg=' . urlencode('Settings saved.'));
+    exit;
+}
+
+if (($_POST['act'] ?? '') === 'install_plugin') {
+    $url = trim($_POST['url'] ?? '');
+    $err = installPluginFromUrl($url);
+    if ($err) {
+        header('Location: ?step=plugins&err=' . urlencode($err));
+    } else {
+        header('Location: ?step=plugins&msg=' . urlencode('Plugin installed successfully.'));
+    }
+    exit;
+}
+
+if (($_POST['act'] ?? '') === 'uninstall_plugin') {
+    $slug = preg_replace('/[^a-z0-9_-]/', '', $_POST['slug'] ?? '');
+    if ($slug) {
+        $officials = array_keys(officialPlugins());
+        if (!in_array($slug, $officials)) {
+            try {
+                $db = getDB();
+                $db->prepare("DELETE FROM plugins WHERE slug=?")->execute([$slug]);
+                $db->prepare("DELETE FROM server_settings WHERE `key` LIKE ?")->execute(['plugin_' . $slug . '_%']);
+                $dir = BASE . '/storage/app/public/plugins/' . $slug;
+                if (is_dir($dir)) rmdirRecursive($dir);
+            } catch (\Throwable $e) {}
+        }
+    }
+    header('Location: ?step=plugins&msg=' . urlencode('Plugin removed.'));
+    exit;
+}
+
+if (($_POST['act'] ?? '') === 'upload_emote') {
+    $name = strtolower(preg_replace('/[^a-z0-9_-]/i', '', $_POST['emote_name'] ?? ''));
+    $file = $_FILES['emote_file'] ?? null;
+    $err  = null;
+    if (!$name || strlen($name) < 2 || strlen($name) > 32) {
+        $err = 'Emote name must be 2–32 characters (letters, numbers, _ or -)';
+    } elseif (!$file || $file['error'] !== UPLOAD_ERR_OK) {
+        $err = 'File upload failed (error ' . ($file['error'] ?? '?') . ')';
+    } else {
+        $allowed = ['image/gif' => 'gif', 'image/png' => 'png', 'image/webp' => 'webp'];
+        $mime    = mime_content_type($file['tmp_name']);
+        $ext     = $allowed[$mime] ?? null;
+        if (!$ext) $err = 'Unsupported file type. Use GIF, PNG, or WebP.';
+        elseif ($file['size'] > 524288) $err = 'File too large (max 512 KB).';
+        else {
+            $dir = BASE . '/storage/app/public/emotes';
+            if (!is_dir($dir)) mkdir($dir, 0755, true);
+            $filename = $name . '.' . $ext;
+            $animated = ($ext === 'gif');
+            // Remove old file if name already used
+            try {
+                $old = getDB()->prepare("SELECT filename FROM custom_emotes WHERE name=?");
+                $old->execute([$name]);
+                if ($row = $old->fetch()) {
+                    $oldPath = $dir . '/' . $row->filename;
+                    if (file_exists($oldPath)) unlink($oldPath);
+                }
+            } catch (\Throwable $e) {}
+            if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $filename)) {
+                $err = 'Could not save file.';
+            } else {
+                try {
+                    getDB()->prepare("INSERT INTO custom_emotes (name, filename, animated, created_at, updated_at) VALUES (?,?,?,NOW(),NOW()) ON DUPLICATE KEY UPDATE filename=?, animated=?, updated_at=NOW()")
+                           ->execute([$name, $filename, $animated ? 1 : 0, $filename, $animated ? 1 : 0]);
+                } catch (\Throwable $e) { $err = 'Database error: ' . $e->getMessage(); }
+            }
+        }
+    }
+    if ($err) {
+        header('Location: ?step=emotes&err=' . urlencode($err));
+    } else {
+        header('Location: ?step=emotes&msg=' . urlencode(':' . $name . ': uploaded!'));
+    }
+    exit;
+}
+
+if (($_POST['act'] ?? '') === 'delete_emote') {
+    $name = preg_replace('/[^a-z0-9_-]/', '', $_POST['emote_name'] ?? '');
+    if ($name) {
+        try {
+            $db  = getDB();
+            $row = $db->prepare("SELECT filename FROM custom_emotes WHERE name=?");
+            $row->execute([$name]);
+            if ($r = $row->fetch()) {
+                $path = BASE . '/storage/app/public/emotes/' . $r->filename;
+                if (file_exists($path)) unlink($path);
+            }
+            $db->prepare("DELETE FROM custom_emotes WHERE name=?")->execute([$name]);
+        } catch (\Throwable $e) {}
+    }
+    header('Location: ?step=emotes&msg=' . urlencode('Emote deleted.'));
     exit;
 }
 
@@ -475,12 +599,12 @@ function log_line(string $msg): void
 
 function renderLogin(?string $error): void
 {
-    html_head('Update Manager — Login');
+    html_head('Eluth Backend — Sign In');
     ?>
     <div class="login-wrap">
         <div class="login-card">
             <div class="logo">⬡ Eluth</div>
-            <div class="card-title">Update Manager</div>
+            <div class="card-title">Server Backend</div>
             <?php if ($error): ?>
                 <div class="alert alert--error"><?= htmlspecialchars($error) ?></div>
             <?php endif; ?>
@@ -497,22 +621,21 @@ function renderLogin(?string $error): void
 
 function renderPage(string $step): void
 {
-    $titles = [
-        'status'    => 'Status',
-        'download'  => 'Download',
-        'preflight' => 'Preflight',
-        'backup'    => 'Backup',
-        'install'   => 'Install',
-        'rollback'  => 'Rollback',
-    ];
-    html_head('Update Manager — ' . ($titles[$step] ?? 'Update Manager'));
+    $mgmt   = ['plugins' => 'Plugins', 'emotes' => 'Emotes'];
+    $update = ['status' => 'Status', 'download' => 'Download', 'preflight' => 'Preflight', 'backup' => 'Backup', 'install' => 'Install', 'rollback' => 'Rollback'];
+    $all    = array_merge($mgmt, $update);
+    html_head('Eluth Backend — ' . ($all[$step] ?? 'Backend'));
     ?>
     <div class="shell">
         <nav class="topbar">
-            <span class="topbar-brand">⬡ Eluth Update Manager</span>
+            <span class="topbar-brand">⬡ Eluth</span>
             <div class="topbar-steps">
-                <?php foreach ($titles as $s => $label): ?>
+                <?php foreach ($mgmt as $s => $label): ?>
                     <a href="?step=<?= $s ?>" class="step <?= $step === $s ? 'step--active' : '' ?>"><?= $label ?></a>
+                <?php endforeach; ?>
+                <span class="step-sep"></span>
+                <?php foreach ($update as $s => $label): ?>
+                    <a href="?step=<?= $s ?>" class="step step--update <?= $step === $s ? 'step--active' : '' ?>"><?= $label ?></a>
                 <?php endforeach; ?>
             </div>
             <form method="POST" style="margin:0">
@@ -522,13 +645,15 @@ function renderPage(string $step): void
         </nav>
         <main class="content">
             <?php match ($step) {
+                'plugins'   => pagePlugins(),
+                'emotes'    => pageEmotes(),
                 'status'    => pageStatus(),
                 'download'  => pageDownload(),
                 'preflight' => pagePreflight(),
                 'backup'    => pageBackup(),
                 'install'   => pageInstall(),
                 'rollback'  => pageRollback(),
-                default     => pageStatus(),
+                default     => pagePlugins(),
             }; ?>
         </main>
     </div>
@@ -778,6 +903,312 @@ function pageRollback(): void
     <?php
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// DATABASE + PLUGIN HELPERS
+// ══════════════════════════════════════════════════════════════════════════════
+
+function getDB(): PDO
+{
+    global $cfg;
+    static $pdo = null;
+    if ($pdo !== null) return $pdo;
+    $pdo = new PDO(
+        "mysql:host={$cfg['DB_HOST']};port={$cfg['DB_PORT']};dbname={$cfg['DB_DATABASE']};charset=utf8mb4",
+        $cfg['DB_USERNAME'], $cfg['DB_PASSWORD'],
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_OBJ]
+    );
+    return $pdo;
+}
+
+function officialPlugins(): array
+{
+    return [
+        'gif-picker' => [
+            'name'        => 'GIF Picker',
+            'description' => 'Search and insert GIFs from Giphy directly into chat.',
+            'settings'    => [
+                ['key' => 'giphy_key', 'label' => 'Giphy API Key', 'placeholder' => 'Free key at developers.giphy.com'],
+            ],
+        ],
+        'emoticon-picker' => [
+            'name'        => 'Emoticon Picker',
+            'description' => 'Standard emoji and custom animated server emotes.',
+            'settings'    => [],
+        ],
+    ];
+}
+
+function seedOfficialPlugins(): void
+{
+    $db = getDB();
+    foreach (officialPlugins() as $slug => $info) {
+        $manifest = json_encode([
+            'description' => $info['description'],
+            'settings'    => $info['settings'],
+            'zones'       => ['input'],
+            'version'     => '1.0.0',
+        ]);
+        $db->prepare(
+            "INSERT IGNORE INTO plugins (slug, name, tier, manifest, is_enabled, created_at, updated_at)
+             VALUES (?, ?, 'official', ?, 0, NOW(), NOW())"
+        )->execute([$slug, $info['name'], $manifest]);
+    }
+}
+
+function installPluginFromUrl(string $url): ?string
+{
+    if (!filter_var($url, FILTER_VALIDATE_URL)) return 'Invalid URL.';
+    if (!str_ends_with(strtolower($url), '.zip')) return 'URL must point to a .zip file.';
+
+    $tmp = sys_get_temp_dir() . '/eluth-plugin-' . bin2hex(random_bytes(6)) . '.zip';
+    $fh  = fopen($tmp, 'wb');
+    $ch  = curl_init($url);
+    curl_setopt_array($ch, [CURLOPT_FILE => $fh, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 60, CURLOPT_USERAGENT => 'EluthBackend/1.0']);
+    curl_exec($ch);
+    $err = curl_error($ch);
+    curl_close($ch);
+    fclose($fh);
+
+    if ($err) { @unlink($tmp); return 'Download failed: ' . $err; }
+    if (filesize($tmp) > 20971520) { @unlink($tmp); return 'Plugin zip too large (max 20 MB).'; }
+
+    $extract = sys_get_temp_dir() . '/eluth-plugin-ext-' . bin2hex(random_bytes(6));
+    $zip = new ZipArchive();
+    if ($zip->open($tmp) !== true) { @unlink($tmp); return 'Could not open zip.'; }
+    $zip->extractTo($extract);
+    $zip->close();
+    @unlink($tmp);
+
+    // Unwrap single top-level directory
+    $entries = array_values(array_filter(scandir($extract), fn($e) => !in_array($e, ['.','..'])));
+    $root    = (count($entries) === 1 && is_dir($extract . '/' . $entries[0]))
+               ? $extract . '/' . $entries[0] : $extract;
+
+    $manifestPath = $root . '/plugin.json';
+    if (!file_exists($manifestPath)) { rmdirRecursive($extract); return 'plugin.json not found in zip.'; }
+
+    $manifest = json_decode(file_get_contents($manifestPath), true);
+    if (!$manifest) { rmdirRecursive($extract); return 'plugin.json is not valid JSON.'; }
+
+    foreach (['name', 'slug', 'version', 'tier'] as $req) {
+        if (empty($manifest[$req])) { rmdirRecursive($extract); return "plugin.json missing required field: {$req}"; }
+    }
+
+    $slug = preg_replace('/[^a-z0-9_-]/', '', strtolower($manifest['slug']));
+    if (!$slug) { rmdirRecursive($extract); return 'Invalid plugin slug.'; }
+
+    // Block overriding official plugins
+    if (array_key_exists($slug, officialPlugins())) {
+        rmdirRecursive($extract);
+        return 'Cannot install over an official built-in plugin.';
+    }
+
+    // Copy files to public plugin storage
+    $dest = BASE . '/storage/app/public/plugins/' . $slug;
+    if (is_dir($dest)) rmdirRecursive($dest);
+    mkdir($dest, 0755, true);
+    foreach (new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST
+    ) as $item) {
+        $rel    = str_replace($root . DIRECTORY_SEPARATOR, '', $item->getPathname());
+        $target = $dest . '/' . $rel;
+        if ($item->isDir()) { if (!is_dir($target)) mkdir($target, 0755, true); }
+        else copy($item->getPathname(), $target);
+    }
+    rmdirRecursive($extract);
+
+    // Upsert plugin DB row
+    $db = getDB();
+    $db->prepare(
+        "INSERT INTO plugins (slug, name, tier, manifest, is_enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 0, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE name=?, tier=?, manifest=?, updated_at=NOW()"
+    )->execute([
+        $slug, $manifest['name'], $manifest['tier'], json_encode($manifest),
+        $manifest['name'], $manifest['tier'], json_encode($manifest),
+    ]);
+
+    return null; // success
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MANAGEMENT PAGES
+// ══════════════════════════════════════════════════════════════════════════════
+
+function pagePlugins(): void
+{
+    try {
+        seedOfficialPlugins();
+        $db      = getDB();
+        $plugins = $db->query("SELECT * FROM plugins ORDER BY tier='official' DESC, name")->fetchAll();
+    } catch (\Throwable $e) {
+        echo '<div class="alert alert--error">Database error: ' . htmlspecialchars($e->getMessage()) . '</div>';
+        return;
+    }
+    $msg = $_GET['msg'] ?? null;
+    $err = $_GET['err'] ?? null;
+    ?>
+    <div class="page-title">Plugin Manager</div>
+    <p class="body-text">Enable or disable plugins for this server. Official plugins are built into the Eluth platform; third-party plugins can be installed below.</p>
+
+    <?php if ($msg): ?><div class="alert alert--info"><?= htmlspecialchars($msg) ?></div><?php endif; ?>
+    <?php if ($err): ?><div class="alert alert--error"><?= htmlspecialchars($err) ?></div><?php endif; ?>
+
+    <?php foreach ($plugins as $plugin):
+        $manifest   = json_decode($plugin->manifest ?? '{}', true) ?? [];
+        $settings   = $manifest['settings'] ?? [];
+        $isEnabled  = (bool) $plugin->is_enabled;
+        $isOfficial = $plugin->tier === 'official';
+
+        // Fetch current setting values
+        $settingValues = [];
+        if ($settings) {
+            $stmt = $db->prepare("SELECT `key`, `value` FROM server_settings WHERE `key` LIKE ?");
+            $stmt->execute(['plugin_' . $plugin->slug . '_%']);
+            foreach ($stmt->fetchAll() as $row) {
+                $k = str_replace('plugin_' . $plugin->slug . '_', '', $row->key);
+                $settingValues[$k] = $row->value;
+            }
+        }
+    ?>
+    <div class="plugin-card <?= $isEnabled ? 'plugin-card--on' : '' ?>">
+        <div class="plugin-card-header">
+            <div class="plugin-meta">
+                <span class="plugin-name"><?= htmlspecialchars($plugin->name) ?></span>
+                <span class="plugin-badge plugin-badge--<?= htmlspecialchars($plugin->tier) ?>"><?= htmlspecialchars($plugin->tier) ?></span>
+                <?php if ($manifest['version'] ?? null): ?>
+                    <span class="plugin-ver">v<?= htmlspecialchars($manifest['version']) ?></span>
+                <?php endif; ?>
+            </div>
+            <?php if ($manifest['description'] ?? null): ?>
+                <div class="plugin-desc"><?= htmlspecialchars($manifest['description']) ?></div>
+            <?php endif; ?>
+            <div class="plugin-actions">
+                <?php if ($isEnabled): ?>
+                    <form method="POST" style="margin:0">
+                        <input type="hidden" name="act" value="disable_plugin">
+                        <input type="hidden" name="slug" value="<?= htmlspecialchars($plugin->slug) ?>">
+                        <button class="btn btn--ghost btn--sm">Disable</button>
+                    </form>
+                <?php else: ?>
+                    <form method="POST" style="margin:0">
+                        <input type="hidden" name="act" value="enable_plugin">
+                        <input type="hidden" name="slug" value="<?= htmlspecialchars($plugin->slug) ?>">
+                        <button class="btn btn--primary btn--sm">Enable</button>
+                    </form>
+                <?php endif; ?>
+                <?php if (!$isOfficial): ?>
+                    <form method="POST" style="margin:0" onsubmit="return confirm('Uninstall <?= htmlspecialchars(addslashes($plugin->name)) ?>?')">
+                        <input type="hidden" name="act" value="uninstall_plugin">
+                        <input type="hidden" name="slug" value="<?= htmlspecialchars($plugin->slug) ?>">
+                        <button class="btn btn--danger btn--sm">Uninstall</button>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <?php if ($isEnabled && $settings): ?>
+        <form method="POST" class="plugin-settings">
+            <input type="hidden" name="act" value="save_plugin_settings">
+            <input type="hidden" name="slug" value="<?= htmlspecialchars($plugin->slug) ?>">
+            <?php foreach ($settings as $s): ?>
+            <div class="setting-row">
+                <label class="label"><?= htmlspecialchars($s['label']) ?></label>
+                <input
+                    class="input setting-input"
+                    type="<?= ($s['type'] ?? 'text') === 'password' ? 'password' : 'text' ?>"
+                    name="setting_<?= htmlspecialchars($s['key']) ?>"
+                    value="<?= htmlspecialchars($settingValues[$s['key']] ?? '') ?>"
+                    placeholder="<?= htmlspecialchars($s['placeholder'] ?? '') ?>"
+                />
+            </div>
+            <?php endforeach; ?>
+            <div style="margin-top:10px;"><button class="btn btn--ghost btn--sm">Save settings</button></div>
+        </form>
+        <?php endif; ?>
+    </div>
+    <?php endforeach; ?>
+
+    <div class="section-title" style="margin-top:32px;">Install third-party plugin</div>
+    <p class="body-text">Paste the direct URL to a GitHub release <code>.zip</code> file. The zip must contain a valid <code>plugin.json</code>.</p>
+    <form method="POST">
+        <input type="hidden" name="act" value="install_plugin">
+        <div class="form-group">
+            <label class="label">Plugin .zip URL</label>
+            <input class="input" type="url" name="url" placeholder="https://github.com/…/releases/download/v1.0.0/plugin.zip" style="max-width:540px;" required />
+        </div>
+        <button class="btn btn--primary">Install plugin</button>
+    </form>
+    <?php
+}
+
+function pageEmotes(): void
+{
+    try {
+        $db     = getDB();
+        $emotes = $db->query("SELECT * FROM custom_emotes ORDER BY name")->fetchAll();
+    } catch (\Throwable $e) {
+        echo '<div class="alert alert--error">Database error: ' . htmlspecialchars($e->getMessage()) . '</div>';
+        return;
+    }
+    $msg = $_GET['msg'] ?? null;
+    $err = $_GET['err'] ?? null;
+    ?>
+    <div class="page-title">Server Emotes</div>
+    <p class="body-text">Upload custom emotes for your server. Members type <code>:emote_name:</code> to use them. Animated GIFs are supported. Max 512 KB per file.</p>
+
+    <?php if ($msg): ?><div class="alert alert--info"><?= htmlspecialchars($msg) ?></div><?php endif; ?>
+    <?php if ($err): ?><div class="alert alert--error"><?= htmlspecialchars($err) ?></div><?php endif; ?>
+
+    <!-- Upload form -->
+    <div class="upload-card">
+        <div class="section-title" style="margin:0 0 14px;">Upload emote</div>
+        <form method="POST" enctype="multipart/form-data">
+            <input type="hidden" name="act" value="upload_emote">
+            <div class="upload-row">
+                <div class="form-group" style="margin:0;flex:0 0 200px;">
+                    <label class="label">Name <span class="muted">(2–32 chars, a-z 0-9 _ -)</span></label>
+                    <input class="input" type="text" name="emote_name" placeholder="e.g. pepehappy" pattern="[a-zA-Z0-9_\-]{2,32}" required />
+                </div>
+                <div class="form-group" style="margin:0;flex:1;">
+                    <label class="label">File <span class="muted">(GIF, PNG, WebP)</span></label>
+                    <input class="input" type="file" name="emote_file" accept="image/gif,image/png,image/webp" required style="padding:6px 10px;" />
+                </div>
+                <div style="padding-top:22px;">
+                    <button class="btn btn--primary">Upload</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Emote grid -->
+    <?php if (empty($emotes)): ?>
+        <div class="empty">No custom emotes yet. Upload one above.</div>
+    <?php else: ?>
+        <div class="section-title">Emotes (<?= count($emotes) ?>)</div>
+        <div class="emote-grid">
+            <?php foreach ($emotes as $emote):
+                $imgSrc = '../storage/emotes/' . htmlspecialchars($emote->filename);
+            ?>
+            <div class="emote-tile">
+                <img src="<?= $imgSrc ?>" alt=":<?= htmlspecialchars($emote->name) ?>:" class="emote-img" loading="lazy" />
+                <div class="emote-name">:<?= htmlspecialchars($emote->name) ?>:</div>
+                <?php if ($emote->animated): ?>
+                    <div class="emote-anim-badge">GIF</div>
+                <?php endif; ?>
+                <form method="POST" onsubmit="return confirm('Delete :<?= htmlspecialchars(addslashes($emote->name)) ?>:?')" style="margin:0">
+                    <input type="hidden" name="act" value="delete_emote">
+                    <input type="hidden" name="emote_name" value="<?= htmlspecialchars($emote->name) ?>">
+                    <button class="btn btn--danger btn--sm" style="width:100%;">Delete</button>
+                </form>
+            </div>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
+    <?php
+}
+
 // ── HTML shell ────────────────────────────────────────────────────────────────
 function html_head(string $title): void { ?>
 <!DOCTYPE html>
@@ -844,6 +1275,34 @@ a{color:#22d3ee;text-decoration:none}
 .steps-list{display:flex;flex-direction:column;gap:8px;font-size:13px;color:rgba(255,255,255,.6);margin-bottom:20px}
 .notes{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:8px;padding:16px;font-size:13px;color:rgba(255,255,255,.6);line-height:1.7;white-space:pre-wrap}
 .empty{color:rgba(255,255,255,.3);font-size:13px;padding:12px 0}
+code{background:rgba(255,255,255,.06);border-radius:3px;padding:1px 5px;font-size:12px;font-family:monospace}
+.step-sep{width:1px;background:rgba(255,255,255,.1);margin:8px 4px;flex-shrink:0}
+.step--update{color:rgba(255,255,255,.35)}
+/* Plugin manager */
+.plugin-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:18px 20px;margin-bottom:12px;transition:border-color .15s}
+.plugin-card--on{border-color:rgba(34,211,238,.25);background:rgba(34,211,238,.03)}
+.plugin-card-header{display:flex;flex-direction:column;gap:8px}
+.plugin-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.plugin-name{font-size:15px;font-weight:700;color:rgba(255,255,255,.9)}
+.plugin-badge{font-size:10px;font-weight:700;letter-spacing:.04em;padding:2px 7px;border-radius:4px;text-transform:uppercase}
+.plugin-badge--official{background:rgba(34,211,238,.15);color:#67e8f9}
+.plugin-badge--approved{background:rgba(52,211,153,.15);color:#6ee7b7}
+.plugin-badge--community{background:rgba(251,191,36,.12);color:#fcd34d}
+.plugin-ver{font-size:11px;color:rgba(255,255,255,.3);font-family:monospace}
+.plugin-desc{font-size:13px;color:rgba(255,255,255,.5);margin-top:2px}
+.plugin-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.plugin-settings{border-top:1px solid rgba(255,255,255,.06);margin-top:14px;padding-top:14px}
+.setting-row{display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+.setting-row .label{min-width:140px;margin:0;flex-shrink:0}
+.setting-input{max-width:340px}
+/* Emotes */
+.upload-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:20px;margin-bottom:24px}
+.upload-row{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.emote-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-top:8px}
+.emote-tile{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:8px;padding:10px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative}
+.emote-img{width:48px;height:48px;object-fit:contain;border-radius:4px}
+.emote-name{font-size:11px;font-family:monospace;color:rgba(255,255,255,.55);text-align:center;word-break:break-all}
+.emote-anim-badge{position:absolute;top:6px;right:6px;font-size:9px;font-weight:700;background:rgba(88,101,242,.3);color:#a5b4fc;border-radius:3px;padding:1px 4px;letter-spacing:.04em}
 </style>
 </head>
 <body>
