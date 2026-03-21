@@ -857,8 +857,20 @@ function pageRollback(): void
 function streamHeader(string $act): void
 {
     $titles = ['download'=>'Downloading…','backup_db'=>'Backing up database…','backup_files'=>'Backing up files…','install'=>'Installing…','migrate'=>'Running migrations…','cleanup'=>'Finishing up…','rollback'=>'Rolling back…','delete_backup'=>'Deleting backup…'];
-    html_head($titles[$act] ?? 'Working…');
-    echo '<div class="shell"><main class="content"><div class="page-title">' . htmlspecialchars($titles[$act] ?? 'Working…') . '</div><div id="log" class="log-box">';
+    $label  = $titles[$act] ?? 'Working…';
+    $steps  = ['status'=>'Status','download'=>'Download Update','preflight'=>'Preflight Check','backup'=>'Backup','install'=>'Install','rollback'=>'Rollback'];
+    html_head($label);
+    echo '<div class="shell">';
+    echo '<nav class="topbar">';
+    echo '<span class="topbar-brand">⬡ Eluth Update Manager</span>';
+    echo '<div class="topbar-steps">';
+    foreach ($steps as $s => $slabel) {
+        echo '<a href="?step=' . $s . '" class="step">' . $slabel . '</a>';
+    }
+    echo '</div>';
+    echo '<form method="POST" style="margin:0"><input type="hidden" name="act" value="logout"><button class="btn btn--ghost btn--sm">Sign out</button></form>';
+    echo '</nav>';
+    echo '<main class="content"><div class="page-title">' . htmlspecialchars($label) . '</div><div id="log" class="log-box">';
 }
 
 function streamFooter(string $act): void
@@ -866,19 +878,15 @@ function streamFooter(string $act): void
     echo '</div></main></div>';
     ?>
     <script>
-    // Auto-scroll log
     const log = document.getElementById('log');
     if (log) new MutationObserver(() => log.scrollTop = log.scrollHeight).observe(log, {childList:true});
 
-    // Watch for NEXT: or DONE: directives
     new MutationObserver(() => {
         const lines = log.querySelectorAll('.log-line');
         const last  = lines[lines.length - 1];
         if (!last) return;
         const txt = last.textContent;
-        if (txt.startsWith('NEXT:')) {
-            setTimeout(() => { window.location = '?step=' + txt.split(':')[1]; }, 800);
-        } else if (txt.startsWith('DONE:')) {
+        if (txt.startsWith('NEXT:') || txt.startsWith('DONE:')) {
             setTimeout(() => { window.location = '?step=' + txt.split(':')[1]; }, 800);
         }
     }).observe(log, {childList:true});
