@@ -1,0 +1,10 @@
+# Block direct access to everything except index.php
+<Files "*">
+    Order Deny,Allow
+    Deny from all
+</Files>
+
+<Files "index.php">
+    Order Allow,Deny
+    Allow from all
+</Files>
