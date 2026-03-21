@@ -847,15 +847,17 @@ function streamFooter(string $act): void
     const log = document.getElementById('log');
     if (log) new MutationObserver(() => log.scrollTop = log.scrollHeight).observe(log, {childList:true});
 
-    new MutationObserver(() => {
+    function checkRedirect() {
         const lines = log.querySelectorAll('.log-line');
         const last  = lines[lines.length - 1];
         if (!last) return;
-        const txt = last.textContent;
+        const txt = last.textContent.trim();
         if (txt.startsWith('NEXT:') || txt.startsWith('DONE:')) {
             setTimeout(() => { window.location = '?step=' + txt.split(':')[1]; }, 800);
         }
-    }).observe(log, {childList:true});
+    }
+    checkRedirect();
+    new MutationObserver(checkRedirect).observe(log, {childList:true});
     </script>
     <?php html_foot();
 }
