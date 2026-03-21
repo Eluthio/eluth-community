@@ -338,7 +338,7 @@ function dismissWelcome() {
 // ── Auth ───────────────────────────────────────────────────────────────────
 const authenticated = ref(false)
 const authToken     = ref('')
-const jwtFeatures   = ref([])   // features granted by central for this server (from JWT)
+const jwtFeatures   = ref([])   // features granted by central for this server (from JWT); defaults to all if claim absent (old token compat)
 const memberStatus  = ref(null)   // null | 'pending' | 'banned' | 'member'
 const currentUser   = ref({ id: '', username: '' })
 const currentMember      = ref(null)
@@ -379,7 +379,7 @@ async function animateAppIn() {
 async function handleTokenReceived(token) {
     const payload = JSON.parse(atob(token.split('.')[1]))
     currentUser.value = { id: payload.sub, username: payload.username ?? 'User' }
-    jwtFeatures.value = Array.isArray(payload.features) ? payload.features : []
+    jwtFeatures.value = Array.isArray(payload.features) ? payload.features : ['dms', 'calls', 'friends', 'profile']
     localStorage.setItem('eluth_token', token)
     authToken.value     = token
     authenticated.value = true
@@ -522,6 +522,10 @@ const showJoinRequests = ref(false)
 
 watch(showMembers,     v => localStorage.setItem('ui_show_members', v))
 watch(showDMs,         v => localStorage.setItem('ui_show_dms', v ? '1' : '0'))
+watch(jwtFeatures, (features) => {
+    if (!features.includes('dms'))     showDMs.value     = false
+    if (!features.includes('friends')) showFriends.value = false
+}, { immediate: true })
 watch(activeChannelId, v => v ? localStorage.setItem('ui_active_channel', v) : null)
 watch(centralEcho, (echo) => {
     if (echo) subscribeToCentralUserChannel(echo)
