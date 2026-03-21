@@ -5,7 +5,8 @@
             <nav class="settings-nav">
                 <div class="settings-nav-server">My Settings</div>
                 <div class="settings-nav-group-label">Account</div>
-                <button :class="navClass('profile')" @click="panel = 'profile'">Profile</button>
+                <button :class="navClass('profile')"  @click="panel = 'profile'">Profile</button>
+                <button :class="navClass('security')" @click="panel = 'security'">Security</button>
                 <div class="settings-nav-divider" />
                 <div class="settings-nav-group-label">Communication</div>
                 <button :class="navClass('audio')"   @click="panel = 'audio'">Audio</button>
@@ -133,6 +134,42 @@
                     </div>
                 </div>
 
+                <!-- Security -->
+                <div v-else-if="panel === 'security'" class="settings-panel">
+                    <div class="usettings-section-label">Change Password</div>
+
+                    <div class="settings-section">
+                        <label class="settings-label">Current password</label>
+                        <input class="settings-input" type="password" v-model="pw.current" placeholder="Your current password" />
+                    </div>
+                    <div class="settings-section">
+                        <label class="settings-label">New password</label>
+                        <input class="settings-input" type="password" v-model="pw.next" placeholder="At least 8 characters" />
+                    </div>
+                    <div class="settings-section">
+                        <label class="settings-label">Confirm new password</label>
+                        <input class="settings-input" type="password" v-model="pw.confirm" placeholder="Repeat new password" />
+                    </div>
+
+                    <div class="settings-section">
+                        <button class="settings-btn-primary" @click="changePassword" :disabled="pw.saving">
+                            {{ pw.saving ? 'Updating…' : 'Update Password' }}
+                        </button>
+                        <div v-if="pw.error" class="settings-error" style="margin-top:8px;">{{ pw.error }}</div>
+                        <div v-if="pw.saved" class="settings-saved" style="margin-top:8px;">Password updated successfully.</div>
+                    </div>
+
+                    <div class="settings-section" style="margin-top:8px;">
+                        <div class="settings-hint" style="line-height:1.6;">
+                            <strong>⚠️ Encrypted messages and forgotten passwords:</strong>
+                            End-to-end encrypted messages can only be read with your password.
+                            If you forget your password, encrypted message history cannot be recovered —
+                            this is the nature of E2EE. Keep your password safe.
+                            Changing your password here automatically re-encrypts your message key.
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Audio -->
                 <div v-else-if="panel === 'audio'" class="settings-panel">
                     <div class="settings-section">
@@ -249,6 +286,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useE2ee } from '../composables/useE2ee.js'
 
 const props = defineProps({
     username:   { type: String, default: '' },
@@ -262,6 +300,7 @@ const emit = defineEmits(['close', 'avatar-updated', 'profile-updated'])
 const panel = ref('profile')
 const panelTitle = computed(() => ({
     profile:    'Profile',
+    security:   'Security',
     audio:      'Audio Settings',
     video:      'Video Settings',
     appearance: 'Appearance',
@@ -308,6 +347,66 @@ const form = ref({
 const profileSaving = ref(false)
 const profileSaved  = ref(false)
 const profileError  = ref('')
+
+// ── Password change ───────────────────────────────────────────────────────
+const e2ee = useE2ee()
+const pw = ref({ current: '', next: '', confirm: '', saving: false, error: '', saved: false })
+
+async function changePassword() {
+    pw.value.error = ''
+    pw.value.saved = false
+
+    if (!pw.value.current || !pw.value.next || !pw.value.confirm) {
+        pw.value.error = 'Please fill in all fields.'; return
+    }
+    if (pw.value.next !== pw.value.confirm) {
+        pw.value.error = 'New passwords do not match.'; return
+    }
+    if (pw.value.next.length < 8) {
+        pw.value.error = 'New password must be at least 8 characters.'; return
+    }
+
+    pw.value.saving = true
+    try {
+        const token = localStorage.getItem('eluth_token') ?? ''
+
+        // Re-encrypt E2EE private key with new password before sending anything
+        const newPrivateKeyEnc = await e2ee.reEncryptForPasswordChange(
+            props.centralUrl, token, pw.value.current, pw.value.next
+        )
+
+        const body = {
+            current_password: pw.value.current,
+            new_password:     pw.value.next,
+            ...(newPrivateKeyEnc ? { private_key_enc: newPrivateKeyEnc } : {}),
+        }
+
+        const res = await fetch(props.centralUrl + '/api/auth/change-password', {
+            method:  'POST',
+            headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body:    JSON.stringify(body),
+        })
+
+        if (!res.ok) {
+            const data = await res.json()
+            pw.value.error = data.message ?? 'Failed to update password.'
+            return
+        }
+
+        // Clear cached E2EE keys — they'll re-derive from the new password next unlock
+        sessionStorage.removeItem('e2ee_private_key')
+        window.electronAPI?.e2eeClearKey?.()
+
+        pw.value.saved   = true
+        pw.value.current = ''
+        pw.value.next    = ''
+        pw.value.confirm = ''
+    } catch {
+        pw.value.error = 'An error occurred. Please try again.'
+    } finally {
+        pw.value.saving = false
+    }
+}
 
 const bannerPreviewStyle = computed(() => {
     const url = bannerPreview.value || currentBannerUrl.value

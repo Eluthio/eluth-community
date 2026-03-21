@@ -282,5 +282,27 @@ export function useE2ee() {
         return _keyPair.value !== null
     }
 
-    return { init, initFromCachedKey, initFromKeychain, encrypt, decrypt, isReady }
+    /**
+     * Re-encrypt the stored private key with a new password.
+     * Call this during password change, BEFORE sending the new password to central.
+     * Returns the new private_key_enc blob to include in the change-password request,
+     * or null if the user has no E2EE keys or the old password is wrong.
+     */
+    async function reEncryptForPasswordChange(centralUrl, accessToken, oldPassword, newPassword) {
+        try {
+            const res = await fetch(`${centralUrl}/api/auth/e2ee/keys`, {
+                headers: { Authorization: 'Bearer ' + accessToken },
+            })
+            if (!res.ok) return null
+            const data = await res.json()
+            if (!data.private_key_enc) return null  // no keys yet — nothing to re-encrypt
+
+            const privateKey = await decryptPrivateKey(data.private_key_enc, oldPassword)
+            return encryptPrivateKey(privateKey, newPassword)
+        } catch {
+            return null  // old password wrong or no keys
+        }
+    }
+
+    return { init, initFromCachedKey, initFromKeychain, reEncryptForPasswordChange, encrypt, decrypt, isReady }
 }
