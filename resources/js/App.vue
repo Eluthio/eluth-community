@@ -269,7 +269,8 @@
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { gsap } from 'gsap'
-import echo from './echo.js'
+import { createEcho } from './echo.js'
+import { loadClientConfig, getConfig } from './clientConfig.js'
 import { useApi, ApiError } from './composables/useApi.js'
 import VideoBackground from './components/VideoBackground.vue'
 import ChannelSidebar  from './components/ChannelSidebar.vue'
@@ -286,7 +287,7 @@ import { createCentralEcho } from './centralEcho.js'
 
 const { get, post } = useApi()
 
-const centralUrl = import.meta.env.VITE_CENTRAL_SERVER_URL ?? ''
+const centralUrl = ref('')
 
 // ── Theme ─────────────────────────────────────────────────────────────────
 const theme = ref({
@@ -682,7 +683,7 @@ let echoChannel = null
 
 function subscribeToChannel(channelId) {
     if (echoChannel) echoChannel.stopListening('.message.sent')
-    echoChannel = echo.channel('channel.' + channelId)
+    echoChannel = window._echo.channel('channel.' + channelId)
     echoChannel.listen('.message.sent', (data) => {
         if (!messages.value.some(m => m.id === data.id)) {
             messages.value.push({ id: data.id, author: data.author, content: data.content, at: data.at })
@@ -904,7 +905,7 @@ function subscribeToCentralUserChannel(echo) {
     try {
         const userId = currentUser.value.id
         if (!userId) return
-        centralUserChannel = echo.channel('user.' + userId)
+        centralUserChannel = window._echo.channel('user.' + userId)
             .listen('.incoming-call', data => {
                 incomingCall.value = { callerName: data.caller_name, callerId: data.caller_id, convId: data.conv_id, offer: data.offer, video: data.video ?? false }
                 startRing()
@@ -947,6 +948,10 @@ async function onCallEnded() {
 
 // ── Init ───────────────────────────────────────────────────────────────────
 onMounted(async () => {
+    await loadClientConfig()
+    centralUrl.value = getConfig().centralUrl ?? ''
+    window._echo = createEcho()
+
     const stored = localStorage.getItem('eluth_token')
     if (stored) {
         try {

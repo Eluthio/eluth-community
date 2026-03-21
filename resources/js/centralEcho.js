@@ -1,5 +1,6 @@
 import Echo from 'laravel-echo'
 import Pusher from 'pusher-js'
+import { getConfig } from './clientConfig.js'
 
 // Two ws-bridge paths — proxy /app2/* to a second ws-bridge instance on port 3001.
 // On 'unavailable' we recreate Echo on the alternate path so the client reconnects
@@ -22,16 +23,17 @@ const WS_PATHS = ['', '/app2']
 export function createCentralEcho(token, onReplace = null, _pathIdx = 0) {
     const wsPath = WS_PATHS[_pathIdx]
 
+    const cfg = getConfig()
     const echo = new Echo({
         broadcaster:       'reverb',
-        key:               import.meta.env.VITE_CENTRAL_REVERB_APP_KEY,
-        wsHost:            import.meta.env.VITE_CENTRAL_REVERB_HOST,
-        wsPort:            import.meta.env.VITE_CENTRAL_REVERB_PORT    ?? 8080,
-        wssPort:           import.meta.env.VITE_CENTRAL_REVERB_PORT    ?? 443,
-        forceTLS:         (import.meta.env.VITE_CENTRAL_REVERB_SCHEME  ?? 'https') === 'https',
+        key:               cfg.centralReverbKey,
+        wsHost:            cfg.centralReverbHost,
+        wsPort:            cfg.centralReverbPort   ?? 8080,
+        wssPort:           cfg.centralReverbPort   ?? 443,
+        forceTLS:         (cfg.centralReverbScheme ?? 'https') === 'https',
         enabledTransports: ['ws', 'wss'],
         wsPath,
-        authEndpoint:      (import.meta.env.VITE_CENTRAL_SERVER_URL ?? '') + '/api/broadcasting/auth',
+        authEndpoint:      (cfg.centralUrl ?? '') + '/api/broadcasting/auth',
         auth: {
             headers: { Authorization: 'Bearer ' + token },
         },

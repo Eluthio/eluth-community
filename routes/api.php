@@ -6,6 +6,21 @@ use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\MemberController;
 use Illuminate\Support\Facades\Route;
 
+// Public: runtime config for the frontend (replaces baked-in VITE_ env vars)
+Route::get('/client-config', function () {
+    return response()->json([
+        'centralUrl'    => env('CENTRAL_SERVER_URL', ''),
+        'reverbKey'     => env('REVERB_APP_KEY', ''),
+        'reverbHost'    => env('VITE_REVERB_HOST', env('REVERB_HOST', '')),
+        'reverbPort'    => (int) env('VITE_REVERB_PORT', env('REVERB_PORT', 443)),
+        'reverbScheme'  => env('VITE_REVERB_SCHEME', env('REVERB_SCHEME', 'https')),
+        'centralReverbKey'    => env('VITE_CENTRAL_REVERB_APP_KEY', env('REVERB_APP_KEY', '')),
+        'centralReverbHost'   => env('VITE_CENTRAL_REVERB_HOST', ''),
+        'centralReverbPort'   => (int) env('VITE_CENTRAL_REVERB_PORT', 443),
+        'centralReverbScheme' => env('VITE_CENTRAL_REVERB_SCHEME', 'https'),
+    ]);
+});
+
 // Public: server info (reads DB settings first, auto-seeds from central if not yet set)
 Route::get('/server', function () {
     $settings = \DB::table('server_settings')->pluck('value', 'key');
