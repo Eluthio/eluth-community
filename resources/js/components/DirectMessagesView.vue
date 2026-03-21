@@ -1,5 +1,4 @@
 <template>
-    <!-- Full-screen DM view — spans the entire below-topbar area -->
     <div class="dm-view">
 
         <!-- Left sidebar: conversation list -->
@@ -9,7 +8,6 @@
                 <button class="dm-view-close" @click="emit('close')" title="Back to server">✕</button>
             </div>
 
-            <!-- Search / new DM -->
             <div class="dm-view-search-wrap">
                 <input
                     class="dm-view-search"
@@ -19,7 +17,6 @@
                 />
             </div>
 
-            <!-- Conversation list -->
             <div class="dm-view-conv-list">
                 <div
                     v-for="c in filteredConversations"
@@ -33,8 +30,11 @@
                         <span v-else>{{ initials(c.participant.username) }}</span>
                     </div>
                     <div class="dm-view-conv-info">
-                        <span class="dm-view-conv-name">{{ c.participant.username }}</span>
-                        <span class="dm-view-conv-preview">{{ c.last_message?.content ?? 'No messages yet' }}</span>
+                        <span class="dm-view-conv-name">
+                            {{ c.participant.username }}
+                            <span v-if="c.encrypted" class="dm-conv-lock" title="End-to-end encrypted">🔒</span>
+                        </span>
+                        <span class="dm-view-conv-preview">{{ previewText(c) }}</span>
                     </div>
                 </div>
 
@@ -44,47 +44,19 @@
             </div>
         </aside>
 
-        <!-- Right area: thread or placeholder -->
+        <!-- Right area -->
         <div class="dm-view-thread">
 
-            <!-- E2EE unlock prompt -->
-            <div v-if="!e2eeReady && !showUnlock" class="dm-e2ee-lock">
-                <div class="dm-e2ee-lock-icon">🔒</div>
-                <div class="dm-e2ee-lock-title">Messages are end-to-end encrypted</div>
-                <div class="dm-e2ee-lock-hint">Enter your Eluth password to unlock your messages for this session.</div>
-                <button class="dm-e2ee-unlock-btn" @click="showUnlock = true">Unlock</button>
-            </div>
-
-            <div v-else-if="showUnlock" class="dm-e2ee-lock">
-                <div class="dm-e2ee-lock-icon">🔒</div>
-                <div class="dm-e2ee-lock-title">Enter your password</div>
-                <input
-                    class="dm-e2ee-passphrase"
-                    type="password"
-                    placeholder="Your Eluth password"
-                    v-model="unlockPassphrase"
-                    @keydown.enter.prevent="unlockE2ee"
-                    autofocus
-                />
-                <div v-if="unlockError" class="dm-e2ee-error">{{ unlockError }}</div>
-                <div class="dm-e2ee-lock-btns">
-                    <button class="dm-e2ee-unlock-btn" :disabled="unlocking" @click="unlockE2ee">
-                        {{ unlocking ? 'Unlocking…' : 'Unlock' }}
-                    </button>
-                    <button class="dm-e2ee-skip-btn" @click="skipE2ee">Use without encryption</button>
-                </div>
-            </div>
-
             <!-- No conversation selected -->
-            <div v-else-if="!activeConv" class="dm-view-placeholder">
+            <div v-if="!activeConv" class="dm-view-placeholder">
                 <div class="dm-view-placeholder-icon">✉</div>
                 <div class="dm-view-placeholder-title">Your Direct Messages</div>
                 <div class="dm-view-placeholder-hint">Select a conversation or right-click a user to start one.</div>
             </div>
 
-            <!-- Active conversation (only shown once E2EE is resolved) -->
-            <template v-else-if="e2eeReady || e2eeSkipped">
-                <!-- Call panel — shown above chat when there's an active call for this conversation -->
+            <!-- Active conversation -->
+            <template v-else>
+                <!-- Call panel -->
                 <VoiceCall
                     v-if="activeCall && activeCall.convId === activeConv.id && centralToken && centralEcho"
                     :conv-id="activeCall.convId"
@@ -111,6 +83,41 @@
                     </div>
                 </div>
 
+                <!-- Unencrypted warning banner -->
+                <div v-if="!activeConv.encrypted" class="dm-banner dm-banner--warn">
+                    ⚠️ <strong>This conversation is not encrypted.</strong>
+                    Messages are protected in transit but could be obtained by authorities under a court order or warrant.
+                </div>
+
+                <!-- Encrypted: unlock prompt (if not yet unlocked) -->
+                <div v-else-if="activeConv.encrypted && !e2eeReady" class="dm-banner dm-banner--lock">
+                    <div class="dm-unlock-row">
+                        <span>🔒 <strong>End-to-end encrypted.</strong> Enter your Eluth password to read and send messages.</span>
+                        <div class="dm-unlock-fields">
+                            <input
+                                class="dm-e2ee-passphrase"
+                                type="password"
+                                placeholder="Your Eluth password"
+                                v-model="unlockPassphrase"
+                                @keydown.enter.prevent="unlockE2ee"
+                            />
+                            <button class="dm-e2ee-unlock-btn" :disabled="unlocking" @click="unlockE2ee">
+                                {{ unlocking ? '…' : 'Unlock' }}
+                            </button>
+                        </div>
+                        <div v-if="unlockError" class="dm-e2ee-error">{{ unlockError }}</div>
+                        <div class="dm-unlock-hint">
+                            For a seamless experience, <a href="https://eluth.io/download" target="_blank" class="dm-unlock-link">download the Eluth app</a> — it unlocks automatically.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Encrypted: ready banner -->
+                <div v-else-if="activeConv.encrypted && e2eeReady" class="dm-banner dm-banner--ok">
+                    🔒 End-to-end encrypted — only you and {{ activeConv.participant.username }} can read these messages.
+                </div>
+
+                <!-- Messages (shown even if locked — messages show as ciphertext until unlocked) -->
                 <div class="dm-view-messages" ref="messagesEl">
                     <div
                         v-for="msg in messages"
@@ -119,21 +126,20 @@
                         :class="{ 'dm-msg--mine': msg.author === currentUsername }"
                     >
                         <div v-if="msg.author !== currentUsername" class="dm-msg-author">{{ msg.author }}</div>
-                        <div class="dm-msg-bubble" :class="{ 'dm-msg-bubble--encrypted': msg._decryptFailed }">
-                            {{ msg._plaintext ?? msg.content }}
+                        <div class="dm-msg-bubble" :class="{ 'dm-msg-bubble--locked': msg.encrypted && !msg._plaintext }">
+                            {{ msg.encrypted ? (msg._plaintext ?? '🔒 Encrypted message — unlock to read') : msg.content }}
                         </div>
-                        <div class="dm-msg-time">
-                            {{ formatTime(msg.at) }}
-                            <span v-if="msg.encrypted" class="dm-msg-e2ee" title="End-to-end encrypted">🔒</span>
-                        </div>
+                        <div class="dm-msg-time">{{ formatTime(msg.at) }}</div>
                     </div>
                 </div>
 
-                <div class="dm-view-input-bar">
+                <!-- Input (disabled if encrypted but not unlocked) -->
+                <div class="dm-view-input-bar" :class="{ 'dm-view-input-bar--locked': activeConv.encrypted && !e2eeReady }">
                     <textarea
                         class="dm-view-input"
                         rows="1"
-                        :placeholder="`Message ${activeConv.participant.username}`"
+                        :placeholder="activeConv.encrypted && !e2eeReady ? 'Unlock to send messages…' : `Message ${activeConv.participant.username}`"
+                        :disabled="activeConv.encrypted && !e2eeReady"
                         v-model="draft"
                         @keydown.enter.exact.prevent="sendMessage"
                         @input="autoResize"
@@ -144,6 +150,40 @@
         </div>
     </div>
 
+    <!-- New conversation: encryption choice modal -->
+    <Teleport to="body">
+        <div v-if="showEncryptionChoice" class="dm-choice-backdrop" @click.self="showEncryptionChoice = false">
+            <div class="dm-choice-modal">
+                <div class="dm-choice-title">Start a conversation with {{ pendingUser?.username }}</div>
+                <div class="dm-choice-subtitle">Choose how this conversation will work:</div>
+
+                <button class="dm-choice-btn dm-choice-btn--encrypted" @click="createConversation(true)">
+                    <div class="dm-choice-btn-icon">🔒</div>
+                    <div class="dm-choice-btn-body">
+                        <div class="dm-choice-btn-label">Encrypted</div>
+                        <div class="dm-choice-btn-desc">
+                            End-to-end encrypted — only you and {{ pendingUser?.username }} can ever read these messages.
+                            On the web, you'll need to enter your password each session.
+                            <strong>For automatic unlock, <a href="https://eluth.io/download" target="_blank" class="dm-choice-link">download the Eluth app</a>.</strong>
+                        </div>
+                    </div>
+                </button>
+
+                <button class="dm-choice-btn dm-choice-btn--plain" @click="createConversation(false)">
+                    <div class="dm-choice-btn-icon">💬</div>
+                    <div class="dm-choice-btn-body">
+                        <div class="dm-choice-btn-label">Standard</div>
+                        <div class="dm-choice-btn-desc">
+                            Not end-to-end encrypted. Messages are secured in transit, but could be obtained by
+                            law enforcement under a court order or warrant.
+                        </div>
+                    </div>
+                </button>
+
+                <button class="dm-choice-cancel" @click="showEncryptionChoice = false">Cancel</button>
+            </div>
+        </div>
+    </Teleport>
 </template>
 
 <script setup>
@@ -165,34 +205,43 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'new-dm', 'start-call', 'call-ended'])
 
-const conversations = ref([])
-const activeConv    = ref(null)
-const messages      = ref([])
-const draft         = ref('')
-const search        = ref('')
-const messagesEl    = ref(null)
-const inputEl       = ref(null)
+const conversations       = ref([])
+const activeConv          = ref(null)
+const messages            = ref([])
+const draft               = ref('')
+const search              = ref('')
+const messagesEl          = ref(null)
+const inputEl             = ref(null)
+const showEncryptionChoice = ref(false)
+const pendingUser          = ref(null)
 
 // ── E2EE ──────────────────────────────────────────────────────────────────
-const e2ee            = useE2ee()
-const e2eeReady       = ref(false)
-const e2eeSkipped     = ref(false)
-const showUnlock      = ref(false)
+const e2ee             = useE2ee()
+const e2eeReady        = ref(false)
 const unlockPassphrase = ref('')
-const unlockError     = ref('')
-const unlocking       = ref(false)
+const unlockError      = ref('')
+const unlocking        = ref(false)
+
+// Try to restore from sessionStorage (key cached for this tab session)
+;(function restoreSessionKey() {
+    const cached = sessionStorage.getItem('e2ee_private_key')
+    if (cached) {
+        e2ee.initFromCachedKey(cached, props.centralUrl, props.token)
+            .then(ok => { if (ok) e2eeReady.value = true })
+            .catch(() => {})
+    }
+})()
 
 async function unlockE2ee() {
     if (!unlockPassphrase.value) return
     unlocking.value = true
     unlockError.value = ''
     try {
-        await e2ee.init(props.centralUrl, props.token, unlockPassphrase.value)
+        const cachedKey = await e2ee.init(props.centralUrl, props.token, unlockPassphrase.value)
         if (e2ee.isReady()) {
-            e2eeReady.value  = true
-            showUnlock.value = false
+            if (cachedKey) sessionStorage.setItem('e2ee_private_key', cachedKey)
+            e2eeReady.value = true
             unlockPassphrase.value = ''
-            // Re-decrypt already-loaded messages
             await decryptMessages(messages.value)
         } else {
             unlockError.value = 'Could not unlock. Check your password.'
@@ -204,23 +253,15 @@ async function unlockE2ee() {
     }
 }
 
-function skipE2ee() {
-    e2eeSkipped.value = true
-    showUnlock.value  = false
-}
-
 async function decryptMessages(msgs) {
     if (!e2ee.isReady()) return
     for (const msg of msgs) {
         if (msg.encrypted && !msg._plaintext) {
             const plain = await e2ee.decrypt(msg.sender_id, props.centralUrl, props.token, msg.content)
-            msg._plaintext    = plain
-            msg._decryptFailed = plain.startsWith('[Encrypted message')
+            msg._plaintext = plain
         }
     }
 }
-
-let echoChannel = null
 
 // ── Filtering ──────────────────────────────────────────────────────────────
 
@@ -231,6 +272,12 @@ const filteredConversations = computed(() => {
         c.participant.username.toLowerCase().includes(q)
     )
 })
+
+function previewText(conv) {
+    if (!conv.last_message) return 'No messages yet'
+    if (conv.encrypted) return '🔒 Encrypted message'
+    return conv.last_message.content
+}
 
 // ── API ────────────────────────────────────────────────────────────────────
 
@@ -264,16 +311,31 @@ async function openConversation(conv) {
     await loadMessages()
 }
 
+// Called from parent (right-click → message user)
 async function startDmWith(user) {
+    // Check if conversation already exists
+    const existing = conversations.value.find(c => c.participant.id === user.id)
+    if (existing) {
+        await openConversation(existing)
+        return
+    }
+    // Show the encryption choice modal
+    pendingUser.value = user
+    showEncryptionChoice.value = true
+}
+
+async function createConversation(encrypted) {
+    showEncryptionChoice.value = false
+    const user = pendingUser.value
+    pendingUser.value = null
+    if (!user) return
+
     try {
-        const conv = await api('POST', '/dm/conversations', { user_id: user.id })
-        // Update or prepend in list
+        const conv = await api('POST', '/dm/conversations', { user_id: user.id, encrypted })
         const idx = conversations.value.findIndex(c => c.id === conv.id)
         if (idx === -1) conversations.value.unshift(conv)
         await openConversation(conv)
-    } catch {
-        /* ignore — conversation list will still show */
-    }
+    } catch { /* ignore */ }
 }
 
 async function loadMessages() {
@@ -281,7 +343,7 @@ async function loadMessages() {
     try {
         const data = await api('GET', '/dm/conversations/' + activeConv.value.id + '/messages')
         messages.value = data.messages
-        await decryptMessages(messages.value)
+        if (e2eeReady.value) await decryptMessages(messages.value)
         await nextTick()
         scrollToBottom()
     } catch { /* silent */ }
@@ -290,6 +352,7 @@ async function loadMessages() {
 async function sendMessage() {
     const content = draft.value.trim()
     if (!content || !activeConv.value) return
+    if (activeConv.value.encrypted && !e2eeReady.value) return
     draft.value = ''
     nextTick(() => { if (inputEl.value) inputEl.value.style.height = 'auto' })
 
@@ -297,15 +360,12 @@ async function sendMessage() {
         const recipientId = activeConv.value.participant.id
         let body = { content, encrypted: false }
 
-        if (e2ee.isReady() && recipientId) {
+        if (activeConv.value.encrypted && e2ee.isReady()) {
             const ciphertext = await e2ee.encrypt(recipientId, props.centralUrl, props.token, content)
-            if (ciphertext) {
-                body = { content: ciphertext, encrypted: true }
-            }
+            if (ciphertext) body = { content: ciphertext, encrypted: true }
         }
 
         const msg = await api('POST', '/dm/conversations/' + activeConv.value.id + '/messages', body)
-        // Store plaintext for immediate display — no need to decrypt our own sent message
         msg._plaintext = content
         messages.value.push(msg)
         await nextTick()
@@ -319,6 +379,8 @@ async function sendMessage() {
 
 // ── Central Echo ───────────────────────────────────────────────────────────
 
+let echoChannel = null
+
 function subscribeToUserChannel() {
     const echo = props.centralEcho
     if (!echo) return
@@ -328,7 +390,6 @@ function subscribeToUserChannel() {
             .listen('.dm.message.sent', async data => {
                 const preview = data.encrypted ? '🔒 Encrypted message' : data.content
 
-                // Update conversation preview
                 const idx = conversations.value.findIndex(c => c.id === data.conversation_id)
                 if (idx !== -1) {
                     conversations.value[idx].last_message = { content: preview, sender: data.author }
@@ -340,8 +401,11 @@ function subscribeToUserChannel() {
 
                 if (activeConv.value?.id === data.conversation_id) {
                     if (!messages.value.some(m => m.id === data.id)) {
-                        const msg = { id: data.id, author: data.author, sender_id: data.sender_id, content: data.content, encrypted: !!data.encrypted, at: data.at }
-                        if (msg.encrypted) await decryptMessages([msg])
+                        const msg = {
+                            id: data.id, author: data.author, sender_id: data.sender_id,
+                            content: data.content, encrypted: !!data.encrypted, at: data.at,
+                        }
+                        if (msg.encrypted && e2eeReady.value) await decryptMessages([msg])
                         messages.value.push(msg)
                         await nextTick()
                         scrollToBottom()
@@ -377,6 +441,11 @@ watch(() => props.centralEcho, (echo) => {
     if (echo && !echoChannel) subscribeToUserChannel()
 })
 
+// When E2EE becomes ready mid-session, decrypt currently visible messages
+watch(e2eeReady, async (ready) => {
+    if (ready && messages.value.length) await decryptMessages(messages.value)
+})
+
 watch(() => props.openWithConvId, async (id) => {
     if (!id) return
     const conv = conversations.value.find(c => c.id === id)
@@ -404,8 +473,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-    // Only stop listening for DM messages — do NOT leave the channel.
-    // App.vue owns the user.{id} channel subscription for calls and keeps it alive.
     echoChannel?.stopListening('.dm.message.sent')
 })
 
@@ -425,52 +492,115 @@ defineExpose({ startDmWith })
 }
 .dm-action-btn:hover { opacity: 1; background: rgba(255,255,255,0.08); transform: scale(1.2); }
 
-.dm-e2ee-lock {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    flex: 1;
-    gap: 12px;
-    padding: 40px;
-    text-align: center;
+.dm-conv-lock { font-size: 11px; margin-left: 4px; }
+
+/* ── Banners ── */
+.dm-banner {
+    padding: 10px 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    flex-shrink: 0;
 }
-.dm-e2ee-lock-icon { font-size: 40px; }
-.dm-e2ee-lock-title { font-size: 16px; font-weight: 600; opacity: 0.9; }
-.dm-e2ee-lock-hint { font-size: 13px; opacity: 0.5; max-width: 320px; line-height: 1.5; }
+.dm-banner--warn {
+    background: rgba(234, 179, 8, 0.1);
+    color: #fbbf24;
+    border-left: 3px solid #fbbf24;
+}
+.dm-banner--lock {
+    background: rgba(88, 101, 242, 0.1);
+    border-left: 3px solid #5865f2;
+}
+.dm-banner--ok {
+    background: rgba(34, 197, 94, 0.08);
+    color: #4ade80;
+    border-left: 3px solid #4ade80;
+    font-size: 12px;
+}
+
+.dm-unlock-row { display: flex; flex-direction: column; gap: 8px; }
+.dm-unlock-fields { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .dm-e2ee-passphrase {
-    width: 280px;
-    padding: 10px 14px;
-    border-radius: 8px;
+    flex: 1;
+    min-width: 180px;
+    padding: 7px 12px;
+    border-radius: 7px;
     border: 1px solid rgba(255,255,255,0.15);
     background: rgba(255,255,255,0.06);
     color: inherit;
-    font-size: 14px;
+    font-size: 13px;
 }
 .dm-e2ee-error { font-size: 12px; color: #ff6b6b; }
-.dm-e2ee-lock-btns { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
 .dm-e2ee-unlock-btn {
-    padding: 8px 20px;
-    border-radius: 8px;
+    padding: 7px 16px;
+    border-radius: 7px;
     border: none;
     background: #5865f2;
     color: #fff;
-    font-size: 14px;
-    cursor: pointer;
-    font-weight: 500;
-}
-.dm-e2ee-unlock-btn:disabled { opacity: 0.5; cursor: default; }
-.dm-e2ee-skip-btn {
-    padding: 8px 16px;
-    border-radius: 8px;
-    border: 1px solid rgba(255,255,255,0.15);
-    background: transparent;
-    color: inherit;
     font-size: 13px;
     cursor: pointer;
-    opacity: 0.6;
+    font-weight: 500;
+    white-space: nowrap;
 }
-.dm-e2ee-skip-btn:hover { opacity: 1; }
-.dm-msg-e2ee { font-size: 10px; opacity: 0.5; margin-left: 4px; }
-.dm-msg-bubble--encrypted { opacity: 0.6; font-style: italic; }
+.dm-e2ee-unlock-btn:disabled { opacity: 0.5; cursor: default; }
+.dm-unlock-hint { font-size: 12px; opacity: 0.55; }
+.dm-unlock-link { color: #93c5fd; text-decoration: none; }
+.dm-unlock-link:hover { text-decoration: underline; }
+
+.dm-msg-bubble--locked { opacity: 0.5; font-style: italic; font-size: 13px; }
+
+.dm-view-input-bar--locked { opacity: 0.4; pointer-events: none; }
+
+/* ── Encryption choice modal ── */
+.dm-choice-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+}
+.dm-choice-modal {
+    background: #1a1d2e;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 28px 24px;
+    width: 420px;
+    max-width: 95vw;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.dm-choice-title { font-size: 17px; font-weight: 600; }
+.dm-choice-subtitle { font-size: 13px; opacity: 0.5; }
+
+.dm-choice-btn {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 16px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.04);
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s, border-color 0.15s;
+}
+.dm-choice-btn:hover { background: rgba(255,255,255,0.08); }
+.dm-choice-btn--encrypted:hover { border-color: #5865f2; }
+.dm-choice-btn--plain:hover { border-color: #fbbf24; }
+.dm-choice-btn-icon { font-size: 26px; flex-shrink: 0; }
+.dm-choice-btn-label { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.dm-choice-btn-desc { font-size: 12px; opacity: 0.6; line-height: 1.5; }
+.dm-choice-link { color: #93c5fd; text-decoration: none; }
+.dm-choice-link:hover { text-decoration: underline; }
+.dm-choice-cancel {
+    align-self: center;
+    background: none;
+    border: none;
+    color: inherit;
+    opacity: 0.4;
+    cursor: pointer;
+    font-size: 13px;
+}
+.dm-choice-cancel:hover { opacity: 0.8; }
 </style>

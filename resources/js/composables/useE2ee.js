@@ -128,6 +128,36 @@ export function useE2ee() {
      *
      * Must be called right after login, while the password is still available.
      */
+    /**
+     * Restore keys from a sessionStorage-cached private key JWK string.
+     * Returns true if successful. Call this on page load before prompting for password.
+     */
+    async function initFromCachedKey(privateJwkJson, centralUrl, accessToken) {
+        try {
+            const jwk = JSON.parse(privateJwkJson)
+            const privateKey = await crypto.subtle.importKey(
+                'jwk', jwk, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']
+            )
+            // Fetch public key from central to complete the pair
+            const res  = await fetch(`${centralUrl}/api/auth/e2ee/keys`, {
+                headers: { Authorization: 'Bearer ' + accessToken },
+            })
+            if (!res.ok) return false
+            const data = await res.json()
+            if (!data.public_key) return false
+            const publicKey = await importPublicKey(JSON.parse(data.public_key))
+            _keyPair.value = { publicKey, privateKey }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /**
+     * Initialise E2EE using the user's password.
+     * Returns the private key as a JWK JSON string for sessionStorage caching,
+     * or null if init failed.
+     */
     async function init(centralUrl, accessToken, password) {
         try {
             // Check if keys already exist
@@ -138,11 +168,12 @@ export function useE2ee() {
             if (res.ok) {
                 const data = await res.json()
                 if (data.public_key && data.private_key_enc) {
-                    // Restore existing key pair
                     const publicKey  = await importPublicKey(JSON.parse(data.public_key))
                     const privateKey = await decryptPrivateKey(data.private_key_enc, password)
                     _keyPair.value = { publicKey, privateKey }
-                    return
+                    // Export private key JWK for sessionStorage caching
+                    const privateJwk = await crypto.subtle.exportKey('jwk', privateKey)
+                    return JSON.stringify(privateJwk)
                 }
             }
 
@@ -154,9 +185,9 @@ export function useE2ee() {
             )
 
             const publicJwk  = await crypto.subtle.exportKey('jwk', keyPair.publicKey)
+            const privateJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey)
             const privateEnc = await encryptPrivateKey(keyPair.privateKey, password)
 
-            // Upload to central
             await fetch(`${centralUrl}/api/auth/e2ee/keys`, {
                 method: 'POST',
                 headers: {
@@ -170,8 +201,10 @@ export function useE2ee() {
             })
 
             _keyPair.value = { publicKey: keyPair.publicKey, privateKey: keyPair.privateKey }
+            return JSON.stringify(privateJwk)
         } catch (err) {
             console.warn('[E2EE] init failed:', err)
+            return null
         }
     }
 
@@ -228,5 +261,5 @@ export function useE2ee() {
         return _keyPair.value !== null
     }
 
-    return { init, encrypt, decrypt, isReady }
+    return { init, initFromCachedKey, encrypt, decrypt, isReady }
 }

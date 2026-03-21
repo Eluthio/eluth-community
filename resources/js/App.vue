@@ -507,6 +507,7 @@ function openLoginPopup() {
 
 async function signOut() {
     if (_refreshTimer) { clearTimeout(_refreshTimer); _refreshTimer = null }
+    sessionStorage.removeItem('e2ee_private_key')
     stopHeartbeat()
     stopPolling()
     await post('/members/presence', { presence: 'offline' }).catch(() => {})
