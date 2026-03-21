@@ -129,6 +129,22 @@ export function useE2ee() {
      * Must be called right after login, while the password is still available.
      */
     /**
+     * Try to restore keys from the Electron OS keychain (safeStorage).
+     * Returns true if successful — call this on app launch before showing any unlock prompt.
+     */
+    async function initFromKeychain(centralUrl, accessToken) {
+        try {
+            const api = window.electronAPI
+            if (!api?.e2eeLoadKey) return false
+            const privateJwkJson = await api.e2eeLoadKey()
+            if (!privateJwkJson) return false
+            return initFromCachedKey(privateJwkJson, centralUrl, accessToken)
+        } catch {
+            return false
+        }
+    }
+
+    /**
      * Restore keys from a sessionStorage-cached private key JWK string.
      * Returns true if successful. Call this on page load before prompting for password.
      */
@@ -171,9 +187,11 @@ export function useE2ee() {
                     const publicKey  = await importPublicKey(JSON.parse(data.public_key))
                     const privateKey = await decryptPrivateKey(data.private_key_enc, password)
                     _keyPair.value = { publicKey, privateKey }
-                    // Export private key JWK for sessionStorage caching
                     const privateJwk = await crypto.subtle.exportKey('jwk', privateKey)
-                    return JSON.stringify(privateJwk)
+                    const jwkJson = JSON.stringify(privateJwk)
+                    // Persist to OS keychain if running in Electron
+                    window.electronAPI?.e2eeSaveKey?.(jwkJson).catch(() => {})
+                    return jwkJson
                 }
             }
 
@@ -201,7 +219,10 @@ export function useE2ee() {
             })
 
             _keyPair.value = { publicKey: keyPair.publicKey, privateKey: keyPair.privateKey }
-            return JSON.stringify(privateJwk)
+            const jwkJson = JSON.stringify(privateJwk)
+            // Persist to OS keychain if running in Electron
+            window.electronAPI?.e2eeSaveKey?.(jwkJson).catch(() => {})
+            return jwkJson
         } catch (err) {
             console.warn('[E2EE] init failed:', err)
             return null
@@ -261,5 +282,5 @@ export function useE2ee() {
         return _keyPair.value !== null
     }
 
-    return { init, initFromCachedKey, encrypt, decrypt, isReady }
+    return { init, initFromCachedKey, initFromKeychain, encrypt, decrypt, isReady }
 }

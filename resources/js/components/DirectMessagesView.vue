@@ -222,13 +222,17 @@ const unlockPassphrase = ref('')
 const unlockError      = ref('')
 const unlocking        = ref(false)
 
-// Try to restore from sessionStorage (key cached for this tab session)
-;(function restoreSessionKey() {
+// Try to restore key: keychain (Electron) → sessionStorage (web) → prompt
+;(async function restoreKey() {
+    // 1. Electron OS keychain — fully automatic, no prompt
+    const keychainOk = await e2ee.initFromKeychain(props.centralUrl, props.token)
+    if (keychainOk) { e2eeReady.value = true; return }
+
+    // 2. sessionStorage — survives page refresh within the same tab
     const cached = sessionStorage.getItem('e2ee_private_key')
     if (cached) {
-        e2ee.initFromCachedKey(cached, props.centralUrl, props.token)
-            .then(ok => { if (ok) e2eeReady.value = true })
-            .catch(() => {})
+        const ok = await e2ee.initFromCachedKey(cached, props.centralUrl, props.token)
+        if (ok) { e2eeReady.value = true }
     }
 })()
 
