@@ -129,6 +129,34 @@ if (($_POST['act'] ?? '') === 'install_plugin') {
     exit;
 }
 
+if (($_POST['act'] ?? '') === 'install_official_plugin') {
+    $slug    = preg_replace('/[^a-z0-9_-]/', '', $_POST['slug'] ?? '');
+    $official = officialPlugins();
+    if (!$slug || !isset($official[$slug])) {
+        header('Location: ?step=plugins&err=' . urlencode('Unknown official plugin.'));
+        exit;
+    }
+    $info     = $official[$slug];
+    $manifest = json_encode([
+        'description' => $info['description'],
+        'settings'    => $info['settings'],
+        'zones'       => ['input'],
+        'version'     => '1.0.0',
+    ]);
+    try {
+        $db = getDB();
+        $db->prepare(
+            "INSERT IGNORE INTO plugins (slug, name, tier, manifest, is_enabled, created_at, updated_at)
+             VALUES (?, ?, 'official', ?, 0, NOW(), NOW())"
+        )->execute([$slug, $info['name'], $manifest]);
+    } catch (\Throwable $e) {
+        header('Location: ?step=plugins&err=' . urlencode('Database error: ' . $e->getMessage()));
+        exit;
+    }
+    header('Location: ?step=plugins&msg=' . urlencode($info['name'] . ' installed. Enable it below.'));
+    exit;
+}
+
 if (($_POST['act'] ?? '') === 'uninstall_plugin') {
     $slug = preg_replace('/[^a-z0-9_-]/', '', $_POST['slug'] ?? '');
     if ($slug) {
@@ -1050,9 +1078,9 @@ function pagePlugins(): void
     }
 
     // Fetch catalogue from central
-    $catalogue   = [];
+    $catalogue    = [];
     $catalogueErr = null;
-    $centralUrl  = rtrim($cfg['CENTRAL_SERVER_URL'] ?? '', '/');
+    $centralUrl   = rtrim($cfg['CENTRAL_SERVER_URL'] ?? '', '/');
     if ($centralUrl) {
         $ch = curl_init($centralUrl . '/api/plugins/catalogue');
         curl_setopt_array($ch, [
@@ -1074,9 +1102,19 @@ function pagePlugins(): void
         $catalogueErr = 'CENTRAL_SERVER_URL not set in .env.';
     }
 
-    // Split catalogue into available (not installed) and show recommended first
-    $available = array_filter($catalogue, fn($p) => !in_array($p['slug'], $installedSlugs));
+    // Split catalogue: available = not yet installed
+    $available = array_values(array_filter($catalogue, fn($p) => !in_array($p['slug'], $installedSlugs)));
     usort($available, fn($a, $b) => ($b['recommended'] <=> $a['recommended']) ?: strcmp($a['name'], $b['name']));
+
+    // Collect all unique tags across available plugins for filter bar
+    $allTags = [];
+    foreach ($available as $p) {
+        foreach (($p['tags'] ?? []) as $tag) {
+            $allTags[$tag] = true;
+        }
+    }
+    ksort($allTags);
+    $allTags = array_keys($allTags);
     ?>
     <div class="page-title">Plugin Manager</div>
 
@@ -1092,7 +1130,6 @@ function pagePlugins(): void
         $manifest   = json_decode($plugin->manifest ?? '{}', true) ?? [];
         $settings   = $manifest['settings'] ?? [];
         $isEnabled  = (bool) $plugin->is_enabled;
-        $isOfficial = $plugin->tier === 'official';
 
         $settingValues = [];
         if ($settings) {
@@ -1112,6 +1149,8 @@ function pagePlugins(): void
                 <?php if ($manifest['version'] ?? null): ?>
                     <span class="plugin-ver">v<?= htmlspecialchars($manifest['version']) ?></span>
                 <?php endif; ?>
+                <span class="plugin-status-dot <?= $isEnabled ? 'dot--on' : 'dot--off' ?>"></span>
+                <span class="plugin-status-label"><?= $isEnabled ? 'Enabled' : 'Disabled' ?></span>
             </div>
             <?php if ($manifest['description'] ?? null): ?>
                 <div class="plugin-desc"><?= htmlspecialchars($manifest['description']) ?></div>
@@ -1160,49 +1199,90 @@ function pagePlugins(): void
     </div>
     <?php endforeach; endif; ?>
 
-    <!-- ── Plugin store ──────────────────────────────────────────────────── -->
-    <div class="section-title" style="margin-top:32px;">Plugin Store</div>
+    <!-- ── Plugin Store ───────────────────────────────────────────────────── -->
+    <div class="store-header">
+        <div class="section-title" style="margin:0;">Plugin Store</div>
+        <?php if (!$catalogueErr && !empty($available)): ?>
+        <input id="store-search" class="input store-search" type="search" placeholder="Search plugins…" oninput="filterStore()" autocomplete="off" />
+        <?php endif; ?>
+    </div>
 
     <?php if ($catalogueErr): ?>
         <div class="alert alert--error"><?= htmlspecialchars($catalogueErr) ?></div>
     <?php elseif (empty($available)): ?>
         <div class="empty">All available plugins are already installed.</div>
     <?php else: ?>
-        <div class="store-grid">
-        <?php foreach ($available as $p): ?>
-            <div class="store-card">
-                <div class="store-card-header">
-                    <div class="plugin-meta">
-                        <span class="plugin-name"><?= htmlspecialchars($p['name']) ?></span>
-                        <span class="plugin-badge plugin-badge--<?= htmlspecialchars($p['tier']) ?>"><?= htmlspecialchars($p['tier']) ?></span>
-                        <?php if ($p['recommended']): ?>
-                            <span class="plugin-badge plugin-badge--recommended">Recommended</span>
+
+        <?php if ($allTags): ?>
+        <div class="tag-filter-bar">
+            <button class="tag-filter active" data-tag="all" onclick="setTagFilter(this)">All</button>
+            <?php foreach ($allTags as $tag): ?>
+            <button class="tag-filter" data-tag="<?= htmlspecialchars($tag) ?>" onclick="setTagFilter(this)"><?= htmlspecialchars(ucfirst($tag)) ?></button>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+
+        <div class="store-grid" id="store-grid">
+        <?php foreach ($available as $p):
+            $tags    = $p['tags'] ?? [];
+            $tagsJson = htmlspecialchars(json_encode($tags), ENT_QUOTES);
+        ?>
+            <div class="store-card"
+                 data-name="<?= htmlspecialchars(strtolower($p['name'])) ?>"
+                 data-desc="<?= htmlspecialchars(strtolower($p['description'] ?? '')) ?>"
+                 data-tags="<?= $tagsJson ?>">
+                <div class="store-card-icon">
+                    <?= strtoupper(substr($p['name'], 0, 2)) ?>
+                </div>
+                <div class="store-card-body">
+                    <div class="store-card-top">
+                        <div class="plugin-meta">
+                            <span class="plugin-name"><?= htmlspecialchars($p['name']) ?></span>
+                            <span class="plugin-badge plugin-badge--<?= htmlspecialchars($p['tier']) ?>"><?= htmlspecialchars($p['tier']) ?></span>
+                            <?php if ($p['recommended']): ?>
+                                <span class="plugin-badge plugin-badge--recommended">Recommended</span>
+                            <?php endif; ?>
+                            <?php if ($p['version'] ?? null): ?>
+                                <span class="plugin-ver">v<?= htmlspecialchars($p['version']) ?></span>
+                            <?php endif; ?>
+                        </div>
+                        <?php if ($p['description'] ?? null): ?>
+                            <div class="plugin-desc"><?= htmlspecialchars($p['description']) ?></div>
                         <?php endif; ?>
-                        <?php if ($p['version'] ?? null): ?>
-                            <span class="plugin-ver">v<?= htmlspecialchars($p['version']) ?></span>
+                        <?php if ($tags): ?>
+                        <div class="store-tags">
+                            <?php foreach ($tags as $tag): ?>
+                            <span class="store-tag"><?= htmlspecialchars($tag) ?></span>
+                            <?php endforeach; ?>
+                        </div>
                         <?php endif; ?>
                     </div>
-                    <?php if ($p['description'] ?? null): ?>
-                        <div class="plugin-desc"><?= htmlspecialchars($p['description']) ?></div>
-                    <?php endif; ?>
-                </div>
-                <div class="store-card-footer">
-                    <?php if ($p['homepage'] ?? null): ?>
-                        <a href="<?= htmlspecialchars($p['homepage']) ?>" target="_blank" class="btn btn--ghost btn--sm">Docs</a>
-                    <?php endif; ?>
-                    <?php if ($p['github_zip_url'] ?? null): ?>
-                        <form method="POST" style="margin:0">
-                            <input type="hidden" name="act" value="install_plugin">
-                            <input type="hidden" name="url" value="<?= htmlspecialchars($p['github_zip_url']) ?>">
-                            <button class="btn btn--primary btn--sm">Install</button>
-                        </form>
-                    <?php else: ?>
-                        <span class="muted" style="font-size:12px;">No download available</span>
-                    <?php endif; ?>
+                    <div class="store-card-footer">
+                        <?php if ($p['homepage'] ?? null): ?>
+                            <a href="<?= htmlspecialchars($p['homepage']) ?>" target="_blank" rel="noopener" class="btn btn--ghost btn--sm">Docs</a>
+                        <?php endif; ?>
+                        <?php if ($p['tier'] === 'official'): ?>
+                            <form method="POST" style="margin:0">
+                                <input type="hidden" name="act" value="install_official_plugin">
+                                <input type="hidden" name="slug" value="<?= htmlspecialchars($p['slug']) ?>">
+                                <button class="btn btn--primary btn--sm">Install</button>
+                            </form>
+                        <?php elseif ($p['github_zip_url'] ?? null): ?>
+                            <form method="POST" style="margin:0">
+                                <input type="hidden" name="act" value="install_plugin">
+                                <input type="hidden" name="url" value="<?= htmlspecialchars($p['github_zip_url']) ?>">
+                                <button class="btn btn--primary btn--sm">Install</button>
+                            </form>
+                        <?php else: ?>
+                            <span class="muted" style="font-size:12px;">Coming soon</span>
+                        <?php endif; ?>
+                    </div>
                 </div>
             </div>
         <?php endforeach; ?>
         </div>
+        <div id="store-empty" class="empty" style="display:none;">No plugins match your search.</div>
+
     <?php endif; ?>
 
     <!-- ── Install unofficial ────────────────────────────────────────────── -->
@@ -1379,10 +1459,25 @@ code{background:rgba(255,255,255,.06);border-radius:3px;padding:1px 5px;font-siz
 .emote-img{width:48px;height:48px;object-fit:contain;border-radius:4px}
 .emote-name{font-size:11px;font-family:monospace;color:rgba(255,255,255,.55);text-align:center;word-break:break-all}
 .emote-anim-badge{position:absolute;top:6px;right:6px;font-size:9px;font-weight:700;background:rgba(88,101,242,.3);color:#a5b4fc;border-radius:3px;padding:1px 4px;letter-spacing:.04em}
-.store-grid{display:flex;flex-direction:column;gap:10px}
-.store-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:16px 20px;display:flex;flex-direction:column;gap:10px}
-.store-card-header{display:flex;flex-direction:column;gap:6px}
-.store-card-footer{display:flex;gap:8px;align-items:center}
+.plugin-status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.dot--on{background:#34d399}.dot--off{background:rgba(255,255,255,.2)}
+.plugin-status-label{font-size:11px;color:rgba(255,255,255,.35)}
+/* Store */
+.store-header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:32px;margin-bottom:14px;flex-wrap:wrap}
+.store-search{max-width:260px;padding:7px 12px;font-size:13px}
+.tag-filter-bar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+.tag-filter{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:4px 12px;font-size:12px;color:rgba(255,255,255,.5);cursor:pointer;transition:all .15s}
+.tag-filter:hover{border-color:rgba(34,211,238,.4);color:rgba(255,255,255,.8)}
+.tag-filter.active{background:rgba(34,211,238,.15);border-color:rgba(34,211,238,.4);color:#67e8f9}
+.store-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.store-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:16px;display:flex;gap:14px;transition:border-color .15s}
+.store-card:hover{border-color:rgba(34,211,238,.2)}
+.store-card-icon{width:44px;height:44px;border-radius:10px;background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.2);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#22d3ee;flex-shrink:0;letter-spacing:-.02em}
+.store-card-body{display:flex;flex-direction:column;gap:8px;flex:1;min-width:0}
+.store-card-top{display:flex;flex-direction:column;gap:5px}
+.store-card-footer{display:flex;gap:8px;align-items:center;margin-top:4px}
+.store-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+.store-tag{font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;background:rgba(255,255,255,.06);color:rgba(255,255,255,.4);text-transform:lowercase;letter-spacing:.03em}
 .plugin-badge--recommended{background:rgba(251,191,36,.15);color:#fcd34d}
 </style>
 </head>
@@ -1391,6 +1486,29 @@ code{background:rgba(255,255,255,.06);border-radius:3px;padding:1px 5px;font-siz
 
 function html_foot(): void { ?>
 <script>
+function filterStore() {
+    const q          = (document.getElementById('store-search')?.value || '').toLowerCase();
+    const activeBtn  = document.querySelector('.tag-filter.active');
+    const activeTag  = activeBtn ? activeBtn.dataset.tag : 'all';
+    let   anyVisible = false;
+    document.querySelectorAll('#store-grid .store-card').forEach(card => {
+        const tags  = JSON.parse(card.dataset.tags || '[]');
+        const name  = card.dataset.name  || '';
+        const desc  = card.dataset.desc  || '';
+        const matchTag    = activeTag === 'all' || tags.includes(activeTag);
+        const matchSearch = !q || name.includes(q) || desc.includes(q) || tags.some(t => t.includes(q));
+        const show = matchTag && matchSearch;
+        card.style.display = show ? '' : 'none';
+        if (show) anyVisible = true;
+    });
+    const empty = document.getElementById('store-empty');
+    if (empty) empty.style.display = anyVisible ? 'none' : '';
+}
+function setTagFilter(btn) {
+    document.querySelectorAll('.tag-filter').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    filterStore();
+}
 function streamFetch(url, body) {
     const log     = document.getElementById('log');
     const runBtn  = document.getElementById('run-btn');
