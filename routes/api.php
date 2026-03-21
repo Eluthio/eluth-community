@@ -4,7 +4,9 @@ use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\ChannelController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\MemberController;
+use App\Http\Controllers\Api\PluginController;
 use App\Http\Controllers\Api\StreamController;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 // Public: runtime config for the frontend (replaces baked-in VITE_ env vars)
@@ -154,6 +156,23 @@ Route::middleware('auth.central')->group(function () {
     Route::post('/admin/roles/{roleId}/update',       [AdminController::class, 'updateRole']);
     Route::delete('/admin/roles/{roleId}',            [AdminController::class, 'deleteRole']);
     Route::post('/admin/roles/{roleId}/delete',       [AdminController::class, 'deleteRole']);
+
+    // Plugins
+    Route::get('/plugins',                          [PluginController::class, 'index']);
+    Route::post('/admin/plugins/{slug}/enable',     [PluginController::class, 'enable']);
+    Route::post('/admin/plugins/{slug}/disable',    [PluginController::class, 'disable']);
+    Route::post('/admin/plugins/{slug}/settings',   [PluginController::class, 'updateSettings']);
+
+    // Debug log — admin only, only when APP_DEBUG is true
+    Route::get('/admin/debug-log', function (Request $request) {
+        if (! config('app.debug')) abort(404);
+        $member = $request->attributes->get('member');
+        if (! $member?->isAdmin()) abort(403);
+        $logPath = storage_path('logs/laravel.log');
+        if (! file_exists($logPath)) return response()->json(['lines' => []]);
+        $lines = array_slice(file($logPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES), -300);
+        return response()->json(['lines' => array_values($lines)]);
+    });
 
     // Streaming — mutating endpoints require auth
     Route::post('/streams/{channel}/start',  [StreamController::class, 'start']);

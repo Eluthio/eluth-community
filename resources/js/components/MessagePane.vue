@@ -93,6 +93,11 @@
                     ref="inputEl"
                 />
                 <button class="input-action" title="Emoji" style="font-size:17px;">✦</button>
+                <GifPicker
+                    v-if="enabledPlugins.includes('gif-picker')"
+                    :settings="pluginSettings['gif-picker'] ?? {}"
+                    @insert="insertGif"
+                />
             </div>
 
             <!-- @mention autocomplete -->
@@ -173,6 +178,7 @@
 import { ref, computed, watch, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { gsap } from 'gsap'
 import StreamPlayer from './StreamPlayer.vue'
+import GifPicker from '../plugins/GifPicker.vue'
 
 const props = defineProps({
     channelName:   { type: String, default: 'general' },
@@ -184,6 +190,8 @@ const props = defineProps({
     canStream:     { type: Boolean, default: false },
     apiBase:       { type: String, default: '' },
     authToken:     { type: String, default: '' },
+    enabledPlugins: { type: Array,  default: () => [] },
+    pluginSettings: { type: Object, default: () => ({}) },
 })
 const emit = defineEmits(['send', 'kick', 'ban', 'open-dm', 'open-user-settings', 'view-profile'])
 
@@ -332,12 +340,17 @@ const memberAvatarMap = computed(() => {
 // ── Message rendering ─────────────────────────────────────────────────────
 function renderContent(content) {
     // Escape HTML first
-    const escaped = content
+    let safe = content
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
+
+    // Embed GIF/image URLs from known CDNs
+    const gifPattern = /https?:\/\/(media\d*\.tenor\.com|c\.tenor\.com|media\d*\.giphy\.com|i\.giphy\.com)\/\S+\.(gif|webp|mp4)(\?\S*)?/gi
+    safe = safe.replace(gifPattern, url => `<img src="${url}" class="msg-gif" alt="GIF" loading="lazy" />`)
+
     // Highlight @mentions
-    return escaped.replace(/@(everyone|here|\w+)/g, (match, name) => {
+    return safe.replace(/@(everyone|here|\w+)/g, (match, name) => {
         if (name === 'everyone' || name === 'here') {
             return `<span class="mention mention--everyone">${match}</span>`
         }
@@ -575,6 +588,13 @@ onUnmounted(() => {
 })
 function onDocEsc(e) { if (e.key === 'Escape') { closeMenu(); closeMention() } }
 
+// ── GIF insert ────────────────────────────────────────────────────────────
+function insertGif(url) {
+    // Append the GIF URL to the draft message
+    draft.value = (draft.value ? draft.value + ' ' : '') + url
+    nextTick(() => inputEl.value?.focus())
+}
+
 // ── Send ──────────────────────────────────────────────────────────────────
 function send() {
     const content = draft.value.trim()
@@ -611,6 +631,14 @@ watch(() => props.messages.length, async () => {
 </script>
 
 <style scoped>
+.msg-gif {
+    display: block;
+    max-width: 300px;
+    max-height: 200px;
+    border-radius: 6px;
+    margin-top: 4px;
+}
+
 .stream-zone {
     display: flex;
     flex-direction: column;

@@ -133,6 +133,8 @@
                         :can-stream="currentMemberProxy?.can('stream') ?? false"
                         api-base=""
                         :auth-token="authToken"
+                        :enabled-plugins="enabledPlugins"
+                        :plugin-settings="pluginSettings"
                         @send="sendMessage"
                         @kick="kickMember"
                         @ban="banMember"
@@ -334,6 +336,10 @@ function dismissWelcome() {
     showWelcomeModal.value = false
     post('/members/dismiss-welcome', {}).catch(() => {})
 }
+
+// ── Plugins ────────────────────────────────────────────────────────────────
+const enabledPlugins    = ref([])   // array of slugs
+const pluginSettings    = ref({})   // { slug: { key: value } }
 
 // ── Auth ───────────────────────────────────────────────────────────────────
 const authenticated = ref(false)
@@ -752,6 +758,7 @@ async function loadAll() {
     try {
         await loadChannels()
         await loadMembers()
+        await loadPlugins()
         if (currentMember.value?.isAdmin) await loadJoinRequests()
         startHeartbeat()
     } catch (e) {
@@ -827,6 +834,26 @@ async function loadJoinRequests() {
 async function loadMessages(channelId) {
     const data = await get('/channels/' + channelId + '/messages')
     messages.value = data.messages
+}
+
+async function loadPlugins() {
+    try {
+        const data = await get('/plugins')
+        enabledPlugins.value = (data.plugins ?? [])
+            .filter(p => p.is_enabled)
+            .map(p => p.slug)
+        // Build settings map: { 'gif-picker': { tenor_key: '...', giphy_key: '...' } }
+        const settings = {}
+        for (const p of (data.plugins ?? [])) {
+            if (p.manifest?.settings) {
+                settings[p.slug] = {}
+                for (const s of p.manifest.settings) {
+                    settings[p.slug][s.key] = s.value ?? ''
+                }
+            }
+        }
+        pluginSettings.value = settings
+    } catch { /* non-critical */ }
 }
 
 async function selectChannel(channel) {

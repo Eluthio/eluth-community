@@ -184,10 +184,49 @@
 
                 <!-- Plugins -->
                 <div v-else-if="panel === 'plugins'" class="settings-panel">
-                    <div class="settings-plugin-placeholder">
-                        <div class="settings-plugin-icon">🧩</div>
-                        <div class="settings-plugin-title">Plugin Marketplace</div>
-                        <div class="settings-hint">Plugins are not yet available. The marketplace is coming in a future update.</div>
+                    <div v-if="pluginsLoading" class="settings-hint">Loading plugins…</div>
+                    <div v-else-if="pluginsList.length === 0" class="settings-hint">No plugins available.</div>
+                    <div v-else class="settings-plugin-list">
+                        <div v-for="plugin in pluginsList" :key="plugin.slug" class="settings-plugin-row">
+                            <div class="settings-plugin-header">
+                                <div class="settings-plugin-info">
+                                    <span class="settings-plugin-name">{{ plugin.name }}</span>
+                                    <span class="settings-plugin-tier" :class="'tier-' + plugin.tier">{{ plugin.tier }}</span>
+                                    <span v-if="plugin.manifest?.description" class="settings-plugin-desc">{{ plugin.manifest.description }}</span>
+                                </div>
+                                <div class="settings-plugin-toggle">
+                                    <button
+                                        class="settings-btn-primary"
+                                        v-if="!plugin.is_enabled"
+                                        @click="enablePlugin(plugin)"
+                                    >Enable</button>
+                                    <button
+                                        class="settings-btn-ghost settings-btn-danger"
+                                        v-else
+                                        @click="disablePlugin(plugin)"
+                                    >Disable</button>
+                                </div>
+                            </div>
+
+                            <!-- Settings fields shown when plugin is enabled and has settings -->
+                            <div v-if="plugin.is_enabled && plugin.manifest?.settings?.length" class="settings-plugin-settings">
+                                <div v-for="setting in plugin.manifest.settings" :key="setting.key" class="settings-section" style="margin-bottom:12px;">
+                                    <label class="settings-label">{{ setting.label }}</label>
+                                    <input
+                                        class="settings-input"
+                                        :type="setting.type ?? 'text'"
+                                        :placeholder="setting.placeholder ?? ''"
+                                        v-model="pluginSettingValues[plugin.slug + '.' + setting.key]"
+                                    />
+                                </div>
+                                <button
+                                    class="settings-btn-primary"
+                                    @click="savePluginSettings(plugin)"
+                                    :disabled="savingPluginSettings[plugin.slug]"
+                                >{{ savingPluginSettings[plugin.slug] ? 'Saving…' : 'Save settings' }}</button>
+                                <span v-if="savedPluginSettings[plugin.slug]" class="settings-saved" style="margin-left:8px;">Saved.</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -645,6 +684,7 @@ watch(() => panel.value, async (p) => {
     if (p === 'members'  && localMembers.value.length === 0)    loadLocalMembers()
     if (p === 'join-requests')                                  await loadJoinRequests()
     if (p === 'content')                                        await loadContentSettings()
+    if (p === 'plugins')                                        await loadPlugins()
 }, { immediate: true })
 
 async function loadContentSettings() {
@@ -908,6 +948,53 @@ async function denyRequest(userId) {
     joinRequests.value = joinRequests.value.filter(r => r.central_user_id !== userId)
 }
 
+// ── Plugins ──────────────────────────────────────────────────────────────────
+const pluginsList           = ref([])
+const pluginsLoading        = ref(false)
+const pluginSettingValues   = ref({})   // keyed as 'slug.key'
+const savingPluginSettings  = ref({})   // { slug: bool }
+const savedPluginSettings   = ref({})   // { slug: bool }
+
+async function loadPlugins() {
+    pluginsLoading.value = true
+    try {
+        const data = await get('/plugins').catch(() => ({ plugins: [] }))
+        pluginsList.value = data.plugins ?? []
+        // Populate setting values
+        const vals = {}
+        for (const plugin of pluginsList.value) {
+            for (const setting of (plugin.manifest?.settings ?? [])) {
+                vals[plugin.slug + '.' + setting.key] = setting.value ?? ''
+            }
+        }
+        pluginSettingValues.value = vals
+    } finally {
+        pluginsLoading.value = false
+    }
+}
+
+async function enablePlugin(plugin) {
+    await post('/admin/plugins/' + plugin.slug + '/enable', {}).catch(() => {})
+    plugin.is_enabled = true
+}
+
+async function disablePlugin(plugin) {
+    await post('/admin/plugins/' + plugin.slug + '/disable', {}).catch(() => {})
+    plugin.is_enabled = false
+}
+
+async function savePluginSettings(plugin) {
+    savingPluginSettings.value[plugin.slug] = true
+    const settings = {}
+    for (const setting of (plugin.manifest?.settings ?? [])) {
+        settings[setting.key] = pluginSettingValues.value[plugin.slug + '.' + setting.key] ?? ''
+    }
+    await post('/admin/plugins/' + plugin.slug + '/settings', { settings }).catch(() => {})
+    savingPluginSettings.value[plugin.slug] = false
+    savedPluginSettings.value[plugin.slug] = true
+    setTimeout(() => { savedPluginSettings.value[plugin.slug] = false }, 2000)
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const { del: deleteRequest } = (() => {
     const { get: _g, post: _p } = useApi()
@@ -922,3 +1009,68 @@ function formatDate(iso) {
     return iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : ''
 }
 </script>
+
+<style scoped>
+.settings-plugin-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.settings-plugin-row {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.settings-plugin-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.settings-plugin-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+}
+
+.settings-plugin-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #e2e8f0;
+}
+
+.settings-plugin-tier {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    width: fit-content;
+}
+.tier-official  { background: rgba(88,101,242,0.2); color: #818cf8; }
+.tier-approved  { background: rgba(34,197,94,0.15); color: #4ade80; }
+.tier-unofficial { background: rgba(234,179,8,0.15); color: #facc15; }
+
+.settings-plugin-desc {
+    font-size: 12px;
+    color: rgba(255,255,255,0.45);
+}
+
+.settings-plugin-toggle {
+    flex-shrink: 0;
+}
+
+.settings-plugin-settings {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+}
+</style>
