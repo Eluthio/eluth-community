@@ -240,6 +240,7 @@ function actionBackup(): void
             if ($count % 200 === 0) log_line("  — {$count} files…");
         }
     }
+    log_line("  — {$count} files collected. Zipping, please wait…");
     $zip->close();
     log_line("✓ Site backup complete — {$count} files, " . formatBytes(filesize($siteOut)) . '.');
 }
