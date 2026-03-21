@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, bcmath, pdo_mysql, zip
+          tools: composer:v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install PHP dependencies
+        run: composer install --no-dev --optimize-autoloader --no-interaction
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build frontend assets
+        run: npm run build
+        env:
+          VITE_CENTRAL_SERVER_URL: ${{ secrets.VITE_CENTRAL_SERVER_URL }}
+          VITE_REVERB_APP_KEY: ${{ secrets.VITE_REVERB_APP_KEY }}
+          VITE_REVERB_HOST: ${{ secrets.VITE_REVERB_HOST }}
+          VITE_REVERB_PORT: ${{ secrets.VITE_REVERB_PORT }}
+          VITE_REVERB_SCHEME: ${{ secrets.VITE_REVERB_SCHEME }}
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Build release zip
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          ZIP_NAME="eluth-community-${VERSION}.zip"
+
+          # Write version file
+          echo "${VERSION}" > VERSION
+
+          # Zip everything except dev/runtime artifacts
+          zip -r "${ZIP_NAME}" . \
+            --exclude "*.git*" \
+            --exclude ".github/*" \
+            --exclude "node_modules/*" \
+            --exclude "storage/logs/*" \
+            --exclude "storage/framework/cache/*" \
+            --exclude "storage/framework/sessions/*" \
+            --exclude "storage/framework/views/*" \
+            --exclude "storage/updates/*" \
+            --exclude "public/hot" \
+            --exclude "tests/*" \
+            --exclude ".env*" \
+            --exclude "*.zip" \
+            --exclude "test-results/*"
+
+          echo "zip_name=${ZIP_NAME}" >> $GITHUB_OUTPUT
+        id: zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ steps.version.outputs.version }}"
+          files: ${{ steps.zip.outputs.zip_name }}
+          generate_release_notes: true
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
