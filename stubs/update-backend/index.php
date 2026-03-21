@@ -57,32 +57,40 @@ if (!($_SESSION['ub_auth'] ?? false)) {
 }
 
 // ── Router ────────────────────────────────────────────────────────────────────
-$step = $_GET['step'] ?? 'status';
-$act  = $_POST['act'] ?? null;
+$step   = $_GET['step']   ?? 'status';
+$action = $_GET['action'] ?? null;
 
-if ($act && $act !== 'login' && $act !== 'logout') {
-    header('Content-Type: text/html; charset=utf-8');
+// Streaming action endpoint — returns plain text, consumed by fetch() in the browser
+if ($action) {
+    header('Content-Type: text/plain; charset=utf-8');
+    header('X-Accel-Buffering: no');
     ob_implicit_flush(true);
-    ob_end_flush();
-    streamHeader($act);
-    match ($act) {
-        'download'     => actionDownload(),
-        'backup'       => actionBackup(),
-        'backup_db'    => actionBackup(),   // legacy alias
-        'backup_files' => actionBackup(),   // legacy alias
-        'install'      => actionInstall(),
-        'rollback'     => actionRollback(),
-        'delete_backup'=> actionDeleteBackup(),
-        default        => log_line('Unknown action.'),
+    @ob_end_flush();
+    match ($action) {
+        'download' => actionDownload(),
+        'backup'   => actionBackup(),
+        'install'  => actionInstall(),
+        'rollback' => actionRollback(),
+        default    => print("Unknown action.\n"),
     };
-    streamFooter($act);
+    exit;
+}
+
+// Quick non-streaming actions
+if (($_POST['act'] ?? '') === 'delete_backup') {
+    $name = basename($_POST['name'] ?? '');
+    if ($name && (str_starts_with($name, 'db-') || str_starts_with($name, 'site-'))) {
+        $path = UPD_STOR . '/' . $name;
+        if (file_exists($path)) unlink($path);
+    }
+    header('Location: ?step=status');
     exit;
 }
 
 renderPage($step);
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ACTIONS
+// ACTIONS  (plain-text streaming — no HTML output)
 // ══════════════════════════════════════════════════════════════════════════════
 
 function actionDownload(): void
@@ -90,8 +98,8 @@ function actionDownload(): void
     $info = latestRelease();
     if (!$info) { log_line('ERROR: Could not fetch release information from GitHub.'); return; }
 
-    $ver     = ltrim($info['tag_name'], 'v');
-    $zipUrl  = null;
+    $ver    = ltrim($info['tag_name'], 'v');
+    $zipUrl = null;
     foreach ($info['assets'] ?? [] as $asset) {
         if (str_ends_with($asset['name'], '.zip')) { $zipUrl = $asset['browser_download_url']; break; }
     }
@@ -100,7 +108,7 @@ function actionDownload(): void
     if (!$zipUrl) { log_line('ERROR: No downloadable zip found in release.'); return; }
 
     $stagingDir = UPD_STOR . "/staging-{$ver}";
-    if (is_dir($stagingDir)) { log_line("Staging directory already exists — cleaning."); rmdirRecursive($stagingDir); }
+    if (is_dir($stagingDir)) { log_line('Staging directory already exists — cleaning.'); rmdirRecursive($stagingDir); }
     mkdir($stagingDir, 0755, true);
 
     $tmpZip = UPD_STOR . "/download-{$ver}.zip";
@@ -147,7 +155,6 @@ function actionDownload(): void
 
     $_SESSION['pending_version'] = $ver;
     log_line("✓ Release v{$ver} staged successfully.");
-    log_line('NEXT:preflight');
 }
 
 function actionBackup(): void
@@ -235,8 +242,6 @@ function actionBackup(): void
     }
     $zip->close();
     log_line("✓ Site backup complete — {$count} files, " . formatBytes(filesize($siteOut)) . '.');
-
-    log_line('NEXT:install');
 }
 
 function actionInstall(): void
@@ -247,16 +252,7 @@ function actionInstall(): void
     $stagingDir = UPD_STOR . "/staging-{$ver}";
     if (!is_dir($stagingDir)) { log_line("ERROR: Staging directory not found for v{$ver}."); return; }
 
-    // Paths never to overwrite (relative to BASE)
-    $protected = [
-        '.env',
-        'storage/',
-        'plugins/',
-        'public/uploads/',
-        'custom-files.json',
-    ];
-
-    // Load any custom protected paths
+    $protected = ['.env', 'storage/', 'plugins/', 'public/uploads/', 'custom-files.json'];
     $customFile = BASE . '/custom-files.json';
     if (file_exists($customFile)) {
         $extra = json_decode(file_get_contents($customFile), true);
@@ -264,23 +260,19 @@ function actionInstall(): void
     }
 
     log_line("Installing v{$ver}…");
-    $copied = 0;
+    $copied  = 0;
     $skipped = 0;
 
     $iter = new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator($stagingDir, FilesystemIterator::SKIP_DOTS),
         RecursiveIteratorIterator::SELF_FIRST
     );
-
     foreach ($iter as $item) {
         $rel    = ltrim(str_replace($stagingDir, '', $item->getPathname()), DIRECTORY_SEPARATOR);
         $target = BASE . DIRECTORY_SEPARATOR . $rel;
-
-        // Check protected
         foreach ($protected as $p) {
             if (str_starts_with($rel, $p)) { $skipped++; continue 2; }
         }
-
         if ($item->isDir()) {
             if (!is_dir($target)) mkdir($target, 0755, true);
         } else {
@@ -290,9 +282,9 @@ function actionInstall(): void
         }
     }
 
-    // Also refresh the update backend itself
-    $slug      = $GLOBALS['cfg']['UPDATE_BACKEND_SLUG'] ?? null;
-    $stubDir   = $stagingDir . '/stubs/update-backend';
+    // Refresh the update backend itself
+    $slug    = $GLOBALS['cfg']['UPDATE_BACKEND_SLUG'] ?? null;
+    $stubDir = $stagingDir . '/stubs/update-backend';
     if ($slug && is_dir($stubDir)) {
         $backendDir = BASE . '/public/' . $slug;
         foreach (new RecursiveIteratorIterator(
@@ -308,9 +300,8 @@ function actionInstall(): void
 
     log_line("✓ {$copied} files installed, {$skipped} protected paths skipped.");
 
-    // ── Migrate ──────────────────────────────────────────────────────────────
+    // ── Migrate ───────────────────────────────────────────────────────────────
     log_line('Running database migrations…');
-
     $autoload  = BASE . '/vendor/autoload.php';
     $bootstrap = BASE . '/bootstrap/app.php';
 
@@ -336,13 +327,9 @@ function actionInstall(): void
     }
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
-    // Write new VERSION
-    if ($ver) {
-        file_put_contents(VER_FILE, $ver . PHP_EOL);
-        log_line("Version file updated to {$ver}.");
-    }
+    file_put_contents(VER_FILE, $ver . PHP_EOL);
+    log_line("Version updated to {$ver}.");
 
-    // Clear Laravel caches (reuse existing $kernel)
     log_line('Clearing application caches…');
     try {
         $kernel->call('optimize:clear');
@@ -352,18 +339,12 @@ function actionInstall(): void
         log_line('Warning: Could not clear caches: ' . $e->getMessage());
     }
 
-    // Remove staging folder
-    if ($ver) {
-        $stagingDir = UPD_STOR . "/staging-{$ver}";
-        if (is_dir($stagingDir)) { rmdirRecursive($stagingDir); log_line('Staging directory removed.'); }
-    }
+    $stagingDir = UPD_STOR . "/staging-{$ver}";
+    if (is_dir($stagingDir)) { rmdirRecursive($stagingDir); log_line('Staging directory removed.'); }
 
-    // Retain only the last 3 sets of backups
     pruneBackups();
-
     unset($_SESSION['pending_version']);
     log_line('✓ Update complete.');
-    log_line('DONE:status');
 }
 
 function actionRollback(): void
@@ -372,6 +353,8 @@ function actionRollback(): void
 
     $siteBackup = $_POST['site_backup'] ?? null;
     $dbBackup   = $_POST['db_backup']   ?? null;
+
+    if (!$siteBackup && !$dbBackup) { log_line('ERROR: No backup selected.'); return; }
 
     if ($siteBackup) {
         $path = UPD_STOR . '/' . basename($siteBackup);
@@ -398,25 +381,12 @@ function actionRollback(): void
                 $cfg['DB_USERNAME'], $cfg['DB_PASSWORD'],
                 [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
             );
-            $sql = file_get_contents($path);
-            $pdo->exec($sql);
+            $pdo->exec(file_get_contents($path));
             log_line('✓ Database restored.');
         } catch (\Throwable $e) {
             log_line('ERROR: Database restore failed: ' . $e->getMessage());
         }
     }
-    log_line('DONE:status');
-}
-
-function actionDeleteBackup(): void
-{
-    $name = basename($_POST['name'] ?? '');
-    if ($name === '' || (!str_starts_with($name, 'db-') && !str_starts_with($name, 'site-'))) {
-        log_line('ERROR: Invalid backup name.'); return;
-    }
-    $path = UPD_STOR . '/' . $name;
-    if (file_exists($path)) { unlink($path); log_line("Deleted: {$name}"); }
-    log_line('DONE:status');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -451,14 +421,14 @@ function currentVersion(): string
 function listBackups(): array
 {
     $files = glob(UPD_STOR . '/{db-,site-}*', GLOB_BRACE) ?: [];
-    $out = [];
+    $out   = [];
     foreach ($files as $f) {
         $out[] = [
-            'name'    => basename($f),
-            'size'    => formatBytes(filesize($f)),
-            'bytes'   => filesize($f),
-            'type'    => str_starts_with(basename($f), 'db-') ? 'Database' : 'Site files',
-            'mtime'   => date('Y-m-d H:i', filemtime($f)),
+            'name'  => basename($f),
+            'size'  => formatBytes(filesize($f)),
+            'bytes' => filesize($f),
+            'type'  => str_starts_with(basename($f), 'db-') ? 'Database' : 'Site files',
+            'mtime' => date('Y-m-d H:i', filemtime($f)),
         ];
     }
     usort($out, fn($a, $b) => $b['bytes'] - $a['bytes']);
@@ -470,9 +440,7 @@ function pruneBackups(): void
     foreach (['db-', 'site-'] as $prefix) {
         $files = glob(UPD_STOR . '/' . $prefix . '*') ?: [];
         usort($files, fn($a, $b) => filemtime($a) - filemtime($b));
-        while (count($files) > 3) {
-            unlink(array_shift($files));
-        }
+        while (count($files) > 3) unlink(array_shift($files));
     }
 }
 
@@ -497,7 +465,7 @@ function formatBytes(int $bytes): string
 
 function log_line(string $msg): void
 {
-    echo '<div class="log-line">' . htmlspecialchars($msg) . '</div>';
+    echo $msg . "\n";
     flush();
 }
 
@@ -531,8 +499,8 @@ function renderPage(string $step): void
 {
     $titles = [
         'status'    => 'Status',
-        'download'  => 'Download Update',
-        'preflight' => 'Preflight Check',
+        'download'  => 'Download',
+        'preflight' => 'Preflight',
         'backup'    => 'Backup',
         'install'   => 'Install',
         'rollback'  => 'Rollback',
@@ -552,7 +520,6 @@ function renderPage(string $step): void
                 <button class="btn btn--ghost btn--sm">Sign out</button>
             </form>
         </nav>
-
         <main class="content">
             <?php match ($step) {
                 'status'    => pageStatus(),
@@ -570,12 +537,11 @@ function renderPage(string $step): void
 
 function pageStatus(): void
 {
-    $current = currentVersion();
-    $release = latestRelease();
-    $latest  = $release ? ltrim($release['tag_name'], 'v') : null;
-    $notes   = $release['body'] ?? null;
-    $pending = $_SESSION['pending_version'] ?? null;
-    $backups = listBackups();
+    $current  = currentVersion();
+    $release  = latestRelease();
+    $latest   = $release ? ltrim($release['tag_name'], 'v') : null;
+    $notes    = $release['body'] ?? null;
+    $backups  = listBackups();
     $upToDate = $latest && version_compare($latest, $current, '<=');
     ?>
     <div class="page-title">Server Status</div>
@@ -647,21 +613,23 @@ function pageDownload(): void
     $current = currentVersion();
     $staged  = $latest && is_dir(UPD_STOR . "/staging-{$latest}");
     ?>
-    <div class="page-title">Download Update</div>
+    <div class="page-title">Step 1 — Download Update</div>
     <?php if (!$release): ?>
         <div class="alert alert--error">Could not reach GitHub. Check your internet connection and try again.</div>
     <?php elseif (version_compare($latest, $current, '<=')):  ?>
         <div class="alert alert--info">You are already on the latest version (<?= htmlspecialchars($current) ?>).</div>
+        <div class="action-bar"><a href="?step=status" class="btn btn--ghost">← Back to Status</a></div>
     <?php else: ?>
         <p class="body-text">This will download <strong>v<?= htmlspecialchars($latest) ?></strong> into a staging area.
             Nothing will be changed on your live site yet.</p>
         <?php if ($staged): ?>
-            <div class="alert alert--info">v<?= htmlspecialchars($latest) ?> is already staged. You can proceed to the next step.</div>
+            <div class="alert alert--info" style="margin-bottom:16px;">v<?= htmlspecialchars($latest) ?> is already staged.</div>
         <?php endif; ?>
         <div class="action-bar">
-            <button class="btn btn--primary" onclick="runAction('download')">
+            <button id="run-btn" class="btn btn--primary" onclick="runAction('download')">
                 <?= $staged ? 'Re-download v' . htmlspecialchars($latest) : 'Download v' . htmlspecialchars($latest) ?>
             </button>
+            <a id="next-btn" href="?step=preflight" class="btn btn--ghost" style="display:none">Next: Preflight →</a>
             <?php if ($staged): ?>
                 <a href="?step=preflight" class="btn btn--ghost">Skip to Preflight →</a>
             <?php endif; ?>
@@ -673,14 +641,14 @@ function pageDownload(): void
 
 function pagePreflight(): void
 {
-    $ver = $_SESSION['pending_version'] ?? null;
+    $ver        = $_SESSION['pending_version'] ?? null;
     $stagingDir = $ver ? UPD_STOR . "/staging-{$ver}" : null;
     ?>
-    <div class="page-title">Preflight Check</div>
+    <div class="page-title">Step 2 — Preflight Check</div>
     <?php if (!$ver || !$stagingDir || !is_dir($stagingDir)): ?>
         <div class="alert alert--error">No staged release found. Go back and run Download first.</div>
+        <div class="action-bar"><a href="?step=download" class="btn btn--ghost">← Download</a></div>
     <?php else:
-        // Build list of changed files
         $changed   = [];
         $conflicts = [];
         $protected = ['plugins/', '.env', 'storage/', 'public/uploads/', 'custom-files.json'];
@@ -705,23 +673,12 @@ function pagePreflight(): void
                 $changed[] = ['rel' => $rel, 'status' => 'changed'];
             }
         }
-
-        // Count pending migrations
         $migrationsChanged = count(array_filter($changed, fn($f) => str_starts_with($f['rel'], 'database/migrations/')));
         ?>
         <div class="card-row">
-            <div class="card">
-                <div class="card-label">Files to update</div>
-                <div class="card-value"><?= count($changed) ?></div>
-            </div>
-            <div class="card">
-                <div class="card-label">New migrations</div>
-                <div class="card-value"><?= $migrationsChanged ?></div>
-            </div>
-            <div class="card">
-                <div class="card-label">Protected (skipped)</div>
-                <div class="card-value"><?= count($conflicts) ?></div>
-            </div>
+            <div class="card"><div class="card-label">Files to update</div><div class="card-value"><?= count($changed) ?></div></div>
+            <div class="card"><div class="card-label">New migrations</div><div class="card-value"><?= $migrationsChanged ?></div></div>
+            <div class="card"><div class="card-label">Protected (skipped)</div><div class="card-value"><?= count($conflicts) ?></div></div>
         </div>
 
         <?php if (!empty($conflicts)): ?>
@@ -747,7 +704,7 @@ function pagePreflight(): void
         </div>
 
         <div class="action-bar">
-            <a href="?step=backup" class="btn btn--primary">Proceed to Backup →</a>
+            <a href="?step=backup" class="btn btn--primary">Next: Backup →</a>
         </div>
     <?php endif; ?>
     <?php
@@ -756,7 +713,7 @@ function pagePreflight(): void
 function pageBackup(): void
 {
     ?>
-    <div class="page-title">Backup</div>
+    <div class="page-title">Step 3 — Backup</div>
     <p class="body-text">A full database dump and site file archive will be created before anything is changed.
         This may take a few minutes depending on your site size.</p>
     <div class="steps-list">
@@ -764,7 +721,8 @@ function pageBackup(): void
         <div>2. Site archive  → <code>storage/updates/site-{ver}-{timestamp}.zip</code></div>
     </div>
     <div class="action-bar">
-        <button class="btn btn--primary" onclick="runAction('backup')">Start Backup</button>
+        <button id="run-btn" class="btn btn--primary" onclick="runAction('backup')">Start Backup</button>
+        <a id="next-btn" href="?step=install" class="btn btn--ghost" style="display:none">Next: Install →</a>
     </div>
     <div id="log" class="log-box" style="display:none"></div>
     <?php
@@ -773,11 +731,12 @@ function pageBackup(): void
 function pageInstall(): void
 {
     ?>
-    <div class="page-title">Install Update</div>
-    <p class="body-text">Files will be copied from the staging area to your live installation.
-        Protected paths will be skipped. Database migrations will run automatically after the file copy.</p>
+    <div class="page-title">Step 4 — Install</div>
+    <p class="body-text">Files will be copied from the staging area, database migrations will run, and caches will be rebuilt.
+        Protected paths will be skipped. This may take a minute or two.</p>
     <div class="action-bar">
-        <button class="btn btn--primary" onclick="runAction('install')">Install Files</button>
+        <button id="run-btn" class="btn btn--primary" onclick="runAction('install')">Install Update</button>
+        <a id="next-btn" href="?step=status" class="btn btn--ghost" style="display:none">Done: View Status →</a>
     </div>
     <div id="log" class="log-box" style="display:none"></div>
     <?php
@@ -786,13 +745,12 @@ function pageInstall(): void
 function pageRollback(): void
 {
     $backups = listBackups();
-    $dbs   = array_filter($backups, fn($b) => $b['type'] === 'Database');
-    $sites = array_filter($backups, fn($b) => $b['type'] === 'Site files');
+    $dbs     = array_filter($backups, fn($b) => $b['type'] === 'Database');
+    $sites   = array_filter($backups, fn($b) => $b['type'] === 'Site files');
     ?>
     <div class="page-title">Rollback</div>
     <div class="alert alert--error">⚠ This will overwrite live files and/or your database. Make sure this is intentional.</div>
-    <form method="POST">
-        <input type="hidden" name="act" value="rollback">
+    <form id="rollback-form">
         <div class="form-group">
             <label class="label">Site backup to restore (optional)</label>
             <select name="site_backup" class="input">
@@ -812,7 +770,8 @@ function pageRollback(): void
             </select>
         </div>
         <div class="action-bar">
-            <button type="submit" class="btn btn--danger" onclick="return confirm('Are you sure? This will overwrite live data.')">Run Rollback</button>
+            <button id="run-btn" type="button" class="btn btn--danger" onclick="runRollback()">Run Rollback</button>
+            <a id="next-btn" href="?step=status" class="btn btn--ghost" style="display:none">Done: View Status →</a>
         </div>
     </form>
     <div id="log" class="log-box" style="display:none"></div>
@@ -820,48 +779,6 @@ function pageRollback(): void
 }
 
 // ── HTML shell ────────────────────────────────────────────────────────────────
-function streamHeader(string $act): void
-{
-    $titles = ['download'=>'Downloading…','backup'=>'Backing up…','backup_db'=>'Backing up…','backup_files'=>'Backing up…','install'=>'Installing…','migrate'=>'Running migrations…','cleanup'=>'Finishing up…','rollback'=>'Rolling back…','delete_backup'=>'Deleting backup…'];
-    $label  = $titles[$act] ?? 'Working…';
-    $steps  = ['status'=>'Status','download'=>'Download Update','preflight'=>'Preflight Check','backup'=>'Backup','install'=>'Install','rollback'=>'Rollback'];
-    html_head($label);
-    echo '<div class="shell">';
-    echo '<nav class="topbar">';
-    echo '<span class="topbar-brand">⬡ Eluth Update Manager</span>';
-    echo '<div class="topbar-steps">';
-    foreach ($steps as $s => $slabel) {
-        echo '<a href="?step=' . $s . '" class="step">' . $slabel . '</a>';
-    }
-    echo '</div>';
-    echo '<form method="POST" style="margin:0"><input type="hidden" name="act" value="logout"><button class="btn btn--ghost btn--sm">Sign out</button></form>';
-    echo '</nav>';
-    echo '<main class="content"><div class="page-title">' . htmlspecialchars($label) . '</div><div id="log" class="log-box">';
-}
-
-function streamFooter(string $act): void
-{
-    echo '</div></main></div>';
-    ?>
-    <script>
-    const log = document.getElementById('log');
-    if (log) new MutationObserver(() => log.scrollTop = log.scrollHeight).observe(log, {childList:true});
-
-    function checkRedirect() {
-        const lines = log.querySelectorAll('.log-line');
-        const last  = lines[lines.length - 1];
-        if (!last) return;
-        const txt = last.textContent.trim();
-        if (txt.startsWith('NEXT:') || txt.startsWith('DONE:')) {
-            setTimeout(() => { window.location = '?step=' + txt.split(':')[1]; }, 800);
-        }
-    }
-    checkRedirect();
-    new MutationObserver(checkRedirect).observe(log, {childList:true});
-    </script>
-    <?php html_foot();
-}
-
 function html_head(string $title): void { ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -894,13 +811,15 @@ a{color:#22d3ee;text-decoration:none}
 .alert--error{background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.25);color:#fca5a5}
 .alert--info{background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.2);color:#67e8f9}
 .btn{display:inline-flex;align-items:center;padding:8px 18px;border-radius:7px;font-size:14px;font-weight:600;cursor:pointer;border:none;transition:all .15s;text-decoration:none}
-.btn--primary{background:#22d3ee;color:#050810}.btn--primary:hover{background:#67e8f9}
+.btn--primary{background:#22d3ee;color:#050810}.btn--primary:hover:not(:disabled){background:#67e8f9}
 .btn--ghost{background:rgba(255,255,255,.06);color:rgba(255,255,255,.8)}.btn--ghost:hover{background:rgba(255,255,255,.1)}
-.btn--danger{background:rgba(248,113,113,.2);color:#f87171}.btn--danger:hover{background:rgba(248,113,113,.35)}
+.btn--danger{background:rgba(248,113,113,.2);color:#f87171}.btn--danger:hover:not(:disabled){background:rgba(248,113,113,.35)}
 .btn--sm{padding:5px 12px;font-size:12px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
 .action-bar{display:flex;gap:10px;align-items:center;margin-top:24px}
 .log-box{background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.07);border-radius:8px;padding:16px;font-family:monospace;font-size:12px;max-height:400px;overflow-y:auto;margin-top:20px}
 .log-line{padding:2px 0;color:rgba(255,255,255,.7);white-space:pre-wrap}
+.log-line--error{color:#f87171}
 .table{width:100%;border-collapse:collapse;font-size:13px}
 .table th{text-align:left;padding:8px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:rgba(255,255,255,.35);border-bottom:1px solid rgba(255,255,255,.07)}
 .table td{padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.04)}
@@ -932,16 +851,62 @@ a{color:#22d3ee;text-decoration:none}
 
 function html_foot(): void { ?>
 <script>
+function streamFetch(url, body) {
+    const log     = document.getElementById('log');
+    const runBtn  = document.getElementById('run-btn');
+    const nextBtn = document.getElementById('next-btn');
+
+    if (runBtn)  { runBtn.disabled = true; runBtn.textContent = 'Running…'; }
+    if (log)     { log.innerHTML = ''; log.style.display = 'block'; }
+
+    fetch(url, {method: 'POST', body: body})
+        .then(resp => {
+            const reader = resp.body.getReader();
+            const dec    = new TextDecoder();
+            let   buf    = '';
+
+            function pump() {
+                return reader.read().then(({done, value}) => {
+                    if (value) {
+                        buf += dec.decode(value, {stream: !done});
+                        const parts = buf.split('\n');
+                        buf = parts.pop();
+                        parts.forEach(line => appendLine(log, line));
+                    }
+                    if (done) {
+                        if (buf.trim()) appendLine(log, buf);
+                        const hasError = log.querySelector('.log-line--error');
+                        if (hasError) {
+                            if (runBtn) { runBtn.disabled = false; runBtn.textContent = 'Retry'; }
+                        } else if (nextBtn) {
+                            nextBtn.style.display = 'inline-flex';
+                        }
+                        return;
+                    }
+                    return pump();
+                });
+            }
+            return pump();
+        })
+        .catch(err => appendLine(log, 'ERROR: ' + err.message, true));
+}
+
+function appendLine(log, text, forceError) {
+    if (!text.trim()) return;
+    const d = document.createElement('div');
+    d.className = 'log-line' + (forceError || text.startsWith('ERROR:') ? ' log-line--error' : '');
+    d.textContent = text;
+    log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
+}
+
 function runAction(act) {
-    const log = document.getElementById('log');
-    if (log) log.style.display = 'block';
-    const form = document.createElement('form');
-    form.method = 'POST';
-    const inp = document.createElement('input');
-    inp.type = 'hidden'; inp.name = 'act'; inp.value = act;
-    form.appendChild(inp);
-    document.body.appendChild(form);
-    form.submit();
+    streamFetch('?action=' + act, new FormData());
+}
+
+function runRollback() {
+    if (!confirm('Are you sure? This will overwrite live data.')) return;
+    streamFetch('?action=rollback', new FormData(document.getElementById('rollback-form')));
 }
 </script>
 </body>
