@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\ChannelController;
+use App\Http\Controllers\Api\EmoteController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\MemberController;
 use App\Http\Controllers\Api\PluginController;
@@ -166,6 +167,11 @@ Route::middleware('auth.central')->group(function () {
     Route::post('/admin/plugins/{slug}/enable',         [PluginController::class, 'enable']);
     Route::post('/admin/plugins/{slug}/disable',        [PluginController::class, 'disable']);
     Route::post('/admin/plugins/{slug}/settings',       [PluginController::class, 'updateSettings']);
+
+    // Emotes (emoticon plugin) — list is public, mutations require admin
+    Route::get('/plugins/emoticons/emotes', [EmoteController::class, 'index']);
+    Route::post('/admin/plugins/emoticons/emotes', [EmoteController::class, 'store']);
+    Route::delete('/admin/plugins/emoticons/emotes/{name}', [EmoteController::class, 'destroy']);
 
     // Debug log — admin only, only when APP_DEBUG is true
     Route::get('/admin/debug-log', function (Request $request) {

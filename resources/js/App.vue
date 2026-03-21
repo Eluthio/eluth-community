@@ -135,6 +135,7 @@
                         :auth-token="authToken"
                         :enabled-plugins="enabledPlugins"
                         :plugin-settings="pluginSettings"
+                        :custom-emotes="customEmotes"
                         @send="sendMessage"
                         @kick="kickMember"
                         @ban="banMember"
@@ -340,6 +341,7 @@ function dismissWelcome() {
 // ── Plugins ────────────────────────────────────────────────────────────────
 const enabledPlugins    = ref([])   // array of slugs
 const pluginSettings    = ref({})   // { slug: { key: value } }
+const customEmotes      = ref([])
 
 // ── Auth ───────────────────────────────────────────────────────────────────
 const authenticated = ref(false)
@@ -853,6 +855,16 @@ async function loadPlugins() {
             }
         }
         pluginSettings.value = settings
+
+        // Load custom emotes if emoticon plugin is enabled
+        if (enabledPlugins.value.includes('emoticon-picker')) {
+            try {
+                const emoteData = await get('/plugins/emoticons/emotes')
+                customEmotes.value = emoteData.emotes ?? []
+            } catch { customEmotes.value = [] }
+        } else {
+            customEmotes.value = []
+        }
     } catch { /* non-critical */ }
 }
 

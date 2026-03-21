@@ -1,4 +1,5 @@
-import GifPicker from './GifPicker.vue'
+import GifPicker      from './GifPicker.vue'
+import EmoticonPicker from './EmoticonPicker.vue'
 
 /**
  * Official plugin registry.
@@ -9,6 +10,10 @@ import GifPicker from './GifPicker.vue'
 export const OFFICIAL_PLUGINS = {
     'gif-picker': {
         component: GifPicker,
+        zones: ['input'],
+    },
+    'emoticon-picker': {
+        component: EmoticonPicker,
         zones: ['input'],
     },
 }

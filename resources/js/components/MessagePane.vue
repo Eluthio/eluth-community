@@ -137,6 +137,12 @@
                     :settings="pluginSettings['gif-picker'] ?? {}"
                     @insert="insertGif"
                 />
+                <EmoticonPicker
+                    v-if="enabledPlugins.includes('emoticon-picker')"
+                    :api-base="props.apiBase"
+                    :auth-token="props.authToken"
+                    @insert="insertEmote"
+                />
             </div>
 
             <!-- @mention autocomplete -->
@@ -218,6 +224,7 @@ import { ref, computed, watch, reactive, onMounted, onUnmounted, nextTick } from
 import { gsap } from 'gsap'
 import StreamPlayer from './StreamPlayer.vue'
 import GifPicker from '../plugins/GifPicker.vue'
+import EmoticonPicker from '../plugins/EmoticonPicker.vue'
 
 const props = defineProps({
     channelName:   { type: String, default: 'general' },
@@ -231,6 +238,7 @@ const props = defineProps({
     authToken:     { type: String, default: '' },
     enabledPlugins: { type: Array,  default: () => [] },
     pluginSettings: { type: Object, default: () => ({}) },
+    customEmotes: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['send', 'kick', 'ban', 'open-dm', 'open-user-settings', 'view-profile'])
 
@@ -404,6 +412,12 @@ const memberAvatarMap = computed(() => {
 })
 
 // ── Message rendering ─────────────────────────────────────────────────────
+const emoteMap = computed(() => {
+    const map = {}
+    for (const e of props.customEmotes) map[e.name] = e
+    return map
+})
+
 function renderContent(content) {
     // Escape HTML first
     let safe = content
@@ -414,6 +428,13 @@ function renderContent(content) {
     // Embed GIF/image URLs from known CDNs
     const gifPattern = /https?:\/\/(media\d*\.tenor\.com|c\.tenor\.com|media\d*\.giphy\.com|i\.giphy\.com)\/\S+\.(gif|webp|mp4)(\?\S*)?/gi
     safe = safe.replace(gifPattern, url => `<img src="${url}" class="msg-gif" alt="GIF" loading="lazy" />`)
+
+    // Replace :emote_name: with custom emote images
+    safe = safe.replace(/:([a-z0-9_-]{2,32}):/g, (match, name) => {
+        const emote = emoteMap.value[name]
+        if (!emote) return match
+        return `<img src="${emote.url}" class="msg-emote" alt=":${name}:" title=":${name}:" loading="lazy" />`
+    })
 
     // Highlight @mentions
     return safe.replace(/@(everyone|here|\w+)/g, (match, name) => {
@@ -662,6 +683,22 @@ function insertGif(url) {
     nextTick(() => inputEl.value?.focus())
 }
 
+function insertEmote(text) {
+    // For standard emoji (single char or multi-char sequence), insert at cursor
+    // For custom emotes (:name:), also insert at cursor
+    const el     = inputEl.value
+    const cursor = el?.selectionStart ?? draft.value.length
+    const before = draft.value.substring(0, cursor)
+    const after  = draft.value.substring(cursor)
+    const spacer = before.length && !before.endsWith(' ') ? ' ' : ''
+    draft.value  = before + spacer + text + ' ' + after
+    nextTick(() => {
+        const pos = (before + spacer + text + ' ').length
+        el?.setSelectionRange(pos, pos)
+        el?.focus()
+    })
+}
+
 // ── Send ──────────────────────────────────────────────────────────────────
 function send() {
     const text = draft.value.trim()
@@ -711,6 +748,15 @@ watch(() => props.messages.length, async () => {
     max-height: 200px;
     border-radius: 6px;
     margin-top: 4px;
+}
+
+.msg-emote {
+    display: inline-block;
+    width: 22px;
+    height: 22px;
+    vertical-align: middle;
+    object-fit: contain;
+    margin: 0 1px;
 }
 
 .gif-attachment {

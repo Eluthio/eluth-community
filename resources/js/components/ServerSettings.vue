@@ -12,6 +12,7 @@
                     <button v-if="can('manage_server')"   :class="navClass('appearance')"    @click="panel = 'appearance'">Appearance</button>
                     <button v-if="can('manage_server')"   :class="navClass('content')"       @click="panel = 'content'">Welcome &amp; Rules</button>
                     <button v-if="can('manage_server')"   :class="navClass('plugins')"       @click="panel = 'plugins'">Plugins</button>
+                    <button v-if="can('manage_server')"   :class="navClass('emotes')"        @click="panel = 'emotes'">Emotes</button>
                     <button v-if="can('manage_channels')" :class="navClass('channels')"      @click="panel = 'channels'">Channels</button>
                     <button v-if="can('manage_roles')"    :class="navClass('roles')"         @click="panel = 'roles'">Roles</button>
                     <button v-if="hasAnyMemberPermission" :class="navClass('members')"       @click="panel = 'members'">Members</button>
@@ -501,6 +502,56 @@
                     </div>
                 </div>
 
+                <!-- Emotes -->
+                <div v-else-if="panel === 'emotes'" class="settings-panel">
+                    <!-- Upload form -->
+                    <div class="settings-section">
+                        <label class="settings-label">Upload emote</label>
+                        <div class="settings-hint" style="margin-bottom:8px;">Name: lowercase letters, numbers, underscores, hyphens (2–32 chars). File: GIF, PNG, or WebP — max 512 KB. Animated GIFs are supported.</div>
+                        <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;">
+                            <input
+                                class="settings-input"
+                                v-model="emoteUploadName"
+                                placeholder="emote_name"
+                                style="width:150px;"
+                                :disabled="emoteUploading"
+                            />
+                            <input
+                                ref="emoteFileInput"
+                                type="file"
+                                accept="image/gif,image/png,image/webp"
+                                style="display:none"
+                                @change="onEmoteFileSelected"
+                            />
+                            <button class="settings-btn-secondary" @click="emoteFileInput?.click()" :disabled="emoteUploading">
+                                {{ emoteSelectedFile ? emoteSelectedFile.name : 'Choose file…' }}
+                            </button>
+                            <button class="settings-btn-primary" @click="uploadEmote" :disabled="emoteUploading || !emoteUploadName.trim() || !emoteSelectedFile">
+                                {{ emoteUploading ? 'Uploading…' : 'Upload' }}
+                            </button>
+                        </div>
+                        <div v-if="emoteUploadError"   class="settings-error" style="margin-top:6px;">{{ emoteUploadError }}</div>
+                        <div v-if="emoteUploadSuccess" class="settings-saved" style="margin-top:6px;">{{ emoteUploadSuccess }}</div>
+                    </div>
+
+                    <!-- Emote list -->
+                    <div class="settings-section">
+                        <label class="settings-label">Custom emotes</label>
+                        <div v-if="emotesLoading" class="settings-hint">Loading…</div>
+                        <div v-else-if="emotesList.length === 0" class="settings-hint">No custom emotes yet.</div>
+                        <div v-else class="emotes-grid">
+                            <div v-for="emote in emotesList" :key="emote.name" class="emote-row">
+                                <img :src="emote.url" :alt="emote.name" class="emote-preview" />
+                                <div class="emote-row-info">
+                                    <span class="emote-row-name">:{{ emote.name }}:</span>
+                                    <span v-if="emote.animated" class="emote-row-badge">Animated</span>
+                                </div>
+                                <button class="settings-btn-ghost settings-btn-danger" @click="deleteEmote(emote.name)" style="margin-left:auto;">Delete</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- My Settings -->
                 <div v-else-if="panel === 'my-settings'" class="settings-panel">
                     <div class="settings-hint">User preferences for this server will appear here.</div>
@@ -561,6 +612,7 @@ const panelTitle = computed(() => ({
     'roles':         'Roles',
     'members':       'Members',
     'join-requests': 'Join Requests',
+    'emotes':        'Server Emotes',
     'my-settings':   'My Preferences',
 }[panel.value] ?? ''))
 
@@ -710,6 +762,7 @@ watch(() => panel.value, async (p) => {
     if (p === 'join-requests')                                  await loadJoinRequests()
     if (p === 'content')                                        await loadContentSettings()
     if (p === 'plugins')                                        await loadPlugins()
+    if (p === 'emotes') await loadEmotes()
 }, { immediate: true })
 
 async function loadContentSettings() {
@@ -1050,6 +1103,76 @@ async function uninstallPlugin(plugin) {
     }
 }
 
+// ── Emotes ──────────────────────────────────────────────────────────────────
+const emoteFileInput    = ref(null)
+const emotesList        = ref([])
+const emotesLoading     = ref(false)
+const emoteUploadName   = ref('')
+const emoteSelectedFile = ref(null)
+const emoteUploading    = ref(false)
+const emoteUploadError  = ref('')
+const emoteUploadSuccess = ref('')
+
+async function loadEmotes() {
+    emotesLoading.value = true
+    try {
+        const data = await get('/plugins/emoticons/emotes')
+        emotesList.value = data.emotes ?? []
+    } catch { emotesList.value = [] } finally {
+        emotesLoading.value = false
+    }
+}
+
+function onEmoteFileSelected(e) {
+    emoteSelectedFile.value = e.target.files?.[0] ?? null
+}
+
+async function uploadEmote() {
+    emoteUploadError.value   = ''
+    emoteUploadSuccess.value = ''
+    const name = emoteUploadName.value.trim().toLowerCase()
+    if (!/^[a-z0-9_-]{2,32}$/.test(name)) {
+        emoteUploadError.value = 'Name must be 2–32 chars: lowercase letters, numbers, _ or -'
+        return
+    }
+    if (!emoteSelectedFile.value) return
+    emoteUploading.value = true
+    try {
+        const token = localStorage.getItem('eluth_token') ?? ''
+        const form  = new FormData()
+        form.append('name', name)
+        form.append('file', emoteSelectedFile.value)
+        const res = await fetch('/api/admin/plugins/emoticons/emotes', {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + token },
+            body: form,
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.message ?? 'Upload failed')
+        emoteUploadSuccess.value = ':' + name + ': uploaded!'
+        emoteUploadName.value    = ''
+        emoteSelectedFile.value  = null
+        if (emoteFileInput.value) emoteFileInput.value.value = ''
+        await loadEmotes()
+    } catch (e) {
+        emoteUploadError.value = e.message ?? 'Upload failed'
+    } finally {
+        emoteUploading.value = false
+    }
+}
+
+async function deleteEmote(name) {
+    if (!confirm(`Delete :${name}: permanently?`)) return
+    try {
+        const token = localStorage.getItem('eluth_token') ?? ''
+        await fetch(`/api/admin/plugins/emoticons/emotes/${name}`, {
+            method: 'DELETE',
+            headers: { Authorization: 'Bearer ' + token },
+        })
+        await loadEmotes()
+    } catch { /* ignore */ }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const { del: deleteRequest } = (() => {
     const { get: _g, post: _p } = useApi()
@@ -1127,5 +1250,53 @@ function formatDate(iso) {
     margin-top: 14px;
     padding-top: 14px;
     border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+.emotes-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.emote-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 8px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 6px;
+}
+
+.emote-preview {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.emote-row-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.emote-row-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e2e8f0;
+    font-family: monospace;
+}
+
+.emote-row-badge {
+    font-size: 10px;
+    background: rgba(88,101,242,0.2);
+    color: var(--accent, #5865f2);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-weight: 600;
+    width: fit-content;
 }
 </style>

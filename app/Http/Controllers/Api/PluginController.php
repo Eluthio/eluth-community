@@ -23,6 +23,15 @@ class PluginController extends Controller
                 ],
             ],
         ],
+        'emoticon-picker' => [
+            'name'     => 'Emoticon Picker',
+            'manifest' => [
+                'description' => 'Standard emoji and custom animated server emotes',
+                'version'     => '1.0.0',
+                'zones'       => ['input'],
+                'settings'    => [],
+            ],
+        ],
     ];
 
     public function index(Request $request): JsonResponse
