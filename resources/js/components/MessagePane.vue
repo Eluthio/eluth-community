@@ -4,9 +4,20 @@
         <!-- Stream channel: player or offline placeholder -->
         <template v-if="props.channel?.type === 'stream'">
             <div class="stream-zone">
-                <!-- Live: show player -->
+                <!-- Streamer: local preview with sync/live overlay -->
+                <div v-if="isStreaming" class="stream-preview-wrap">
+                    <video ref="previewEl" class="stream-preview-local" autoplay muted playsinline />
+                    <div class="stream-sync-overlay" :class="{ 'stream-sync-overlay--live': streamSynced }">
+                        <span v-if="streamSynced">🔴 Live</span>
+                        <span v-else class="stream-syncing-text">
+                            <span class="stream-syncing-dot" />Synchronising…
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Viewer: someone else is live -->
                 <StreamPlayer
-                    v-if="props.channel.is_live"
+                    v-else-if="props.channel.is_live"
                     :channel-id="props.channel.id"
                     :api-base="props.apiBase"
                     :streamer-username="props.channel.live_streamer_username ?? ''"
@@ -51,9 +62,7 @@
                         <div v-if="streamError" class="stream-error">{{ streamError }}</div>
                     </template>
                     <template v-else>
-                        <!-- Local preview for streamer -->
-                        <video ref="previewEl" class="stream-preview-local" autoplay muted playsinline />
-                        <div class="stream-live-indicator">🔴 You are live · {{ streamDuration }}</div>
+                        <div class="stream-live-indicator">{{ streamDuration }}</div>
                         <button class="stream-stop-btn" @click="stopStream">⏹ Stop Stream</button>
                     </template>
                 </div>
@@ -232,6 +241,7 @@ const inputEl    = ref(null)
 
 // ── Streaming ──────────────────────────────────────────────────────────────
 const isStreaming     = ref(false)
+const streamSynced    = ref(false)
 const streamStarting  = ref(false)
 const streamError     = ref('')
 const streamDuration  = ref('0:00')
@@ -324,6 +334,7 @@ async function startStream(source = 'display') {
                     headers: { Authorization: 'Bearer ' + props.authToken },
                     body: form,
                 })
+                if (!streamSynced.value) streamSynced.value = true
             } catch { /* ignore individual chunk failures */ }
         }
 
@@ -349,6 +360,7 @@ async function startStream(source = 'display') {
 
 async function stopStream() {
     isStreaming.value = false
+    streamSynced.value = false
     clearInterval(streamTimer)
     streamDuration.value = '0:00'
 
@@ -885,12 +897,61 @@ watch(() => props.messages.length, async () => {
 }
 .stream-source-cancel:hover { background: rgba(255,255,255,0.06); }
 
+.stream-preview-wrap {
+    position: relative;
+    width: 100%;
+    background: #000;
+    line-height: 0;
+}
+
 .stream-preview-local {
     width: 100%;
-    max-height: 200px;
+    max-height: 360px;
     background: #000;
-    border-radius: 6px;
     object-fit: contain;
     display: block;
+}
+
+.stream-sync-overlay {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.7);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: color 0.3s, border-color 0.3s;
+    pointer-events: none;
+}
+
+.stream-sync-overlay--live {
+    color: #f87171;
+    border-color: rgba(239,68,68,0.4);
+}
+
+.stream-syncing-text {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.stream-syncing-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.6);
+    animation: pulse-dot 1.2s ease-in-out infinite;
+    flex-shrink: 0;
+}
+
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.35; transform: scale(0.75); }
 }
 </style>
