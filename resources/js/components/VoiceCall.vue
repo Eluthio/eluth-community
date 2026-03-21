@@ -346,12 +346,12 @@ onUnmounted(cleanup)
     width: 40px; height: 40px; border-radius: 50%; border: none;
     background: rgba(255,255,255,0.08); font-size: 18px; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
-    transition: background 0.15s;
+    transition: background 0.15s, transform 0.15s;
 }
-.call-btn:hover       { background: rgba(255,255,255,0.14); }
+.call-btn:hover       { background: rgba(255,255,255,0.14); transform: scale(1.12); }
 .call-btn--active     { background: rgba(34,211,238,0.15); }
 .call-btn--end        { background: rgba(248,113,113,0.2); }
-.call-btn--end:hover  { background: rgba(248,113,113,0.4); }
+.call-btn--end:hover  { background: rgba(248,113,113,0.4); transform: scale(1.12); }
 
 .call-error { font-size: 12px; color: #f87171; text-align: center; }
 </style>

@@ -332,9 +332,9 @@ onUnmounted(() => {
     padding: 4px 6px;
     border-radius: 6px;
     opacity: 0.6;
-    transition: opacity 0.15s, background 0.15s;
+    transition: opacity 0.15s, background 0.15s, transform 0.15s;
 }
-.dm-action-btn:hover { opacity: 1; background: rgba(255,255,255,0.08); }
+.dm-action-btn:hover { opacity: 1; background: rgba(255,255,255,0.08); transform: scale(1.2); }
 
 /* Incoming call toast */
 .incoming-call-toast {
