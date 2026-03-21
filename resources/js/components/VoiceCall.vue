@@ -112,7 +112,15 @@ function sendSignal(type, data, extra = {}) {
 function listenForSignals() {
     const userId = JSON.parse(atob(props.centralToken.split('.')[1])).sub
     props.centralEcho.channel('user.' + userId).listen('.call.signal', async ({ conv_id, type, data }) => {
-        if (conv_id !== props.convId || !pc) return
+        if (conv_id !== props.convId) return
+
+        if (type === 'hangup') {
+            await cleanup()
+            emit('ended')
+            return
+        }
+
+        if (!pc) return
 
         if (type === 'answer' || type === 'reanswer') {
             await pc.setRemoteDescription({ type: 'answer', sdp: atob(data) })
@@ -133,9 +141,6 @@ function listenForSignals() {
             } else {
                 pendingCandidates.push(data)
             }
-        } else if (type === 'hangup') {
-            await cleanup()
-            emit('ended')
         }
     })
 }

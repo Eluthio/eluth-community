@@ -934,9 +934,13 @@ function answerCall() {
     showDMs.value = true
 }
 
-function declineCall() {
+async function declineCall() {
     stopRing()
+    const convId = incomingCall.value?.convId
     incomingCall.value = null
+    if (convId) {
+        try { await centralApi('POST', `/dm/conversations/${convId}/call/signal`, { type: 'hangup', data: 'end' }) } catch { /* ignore */ }
+    }
 }
 
 async function onCallEnded() {
