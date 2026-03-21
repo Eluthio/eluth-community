@@ -333,11 +333,23 @@ function actionInstall(): void
 
     log_line('Clearing application caches…');
     try {
+        ob_start();
         $kernel->call('optimize:clear');
-        $kernel->call('optimize');
-        log_line('✓ Caches cleared and rebuilt.');
+        ob_end_clean();
+        log_line('✓ Caches cleared.');
     } catch (\Throwable $e) {
+        ob_end_clean();
         log_line('Warning: Could not clear caches: ' . $e->getMessage());
+    }
+
+    try {
+        ob_start();
+        $kernel->call('optimize');
+        ob_end_clean();
+        log_line('✓ Caches rebuilt.');
+    } catch (\Throwable $e) {
+        ob_end_clean();
+        log_line('Warning: Cache rebuild skipped: ' . $e->getMessage());
     }
 
     $stagingDir = UPD_STOR . "/staging-{$ver}";
