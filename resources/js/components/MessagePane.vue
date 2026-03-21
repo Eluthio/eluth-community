@@ -131,7 +131,6 @@
                     @click="onCursorMove"
                     ref="inputEl"
                 />
-                <button class="input-action" title="Emoji" style="font-size:17px;">✦</button>
                 <GifPicker
                     v-if="enabledPlugins.includes('gif-picker')"
                     :settings="pluginSettings['gif-picker'] ?? {}"
