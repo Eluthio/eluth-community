@@ -355,7 +355,7 @@ const communityOrigin = window.location.origin
 function buildAuthorizeUrl(state, prompt = '') {
     const params = new URLSearchParams({ redirect_uri: communityOrigin + '/auth/callback', state })
     if (prompt) params.set('prompt', prompt)
-    return centralUrl + '/oauth/authorize?' + params.toString()
+    return centralUrl.value + '/oauth/authorize?' + params.toString()
 }
 
 function randomState() {
@@ -415,7 +415,7 @@ function startSilentCheck() {
     }, 8000)
 
     const onMessage = async (event) => {
-        if (event.origin !== centralUrl) return
+        if (event.origin !== centralUrl.value) return
         if (!event.data || event.data.state !== state) return
 
         clearTimeout(timer)
@@ -446,7 +446,7 @@ function openLoginPopup() {
     window.open(url, 'eluth-login', `width=${w},height=${h},left=${left},top=${top},resizable=no`)
 
     const onMessage = async (event) => {
-        if (event.origin !== centralUrl) return
+        if (event.origin !== centralUrl.value) return
         if (!event.data || event.data.state !== state) return
 
         window.removeEventListener('message', onMessage)
@@ -473,7 +473,7 @@ async function signOut() {
     authState.value     = 'unauthenticated'
     authError.value     = ''
     // Clear central SSO session so silent-check doesn't immediately re-log in
-    fetch(centralUrl + '/oauth/logout', { credentials: 'include' }).catch(() => {})
+    fetch(centralUrl.value + '/oauth/logout', { credentials: 'include' }).catch(() => {})
 }
 
 async function requestJoin() {
@@ -852,7 +852,7 @@ function onServerUpdated(name) {
 
 // ── Central API helper ─────────────────────────────────────────────────────
 async function centralApi(method, path, body) {
-    const res = await fetch(centralUrl + '/api' + path, {
+    const res = await fetch(centralUrl.value + '/api' + path, {
         method,
         headers: {
             Authorization: 'Bearer ' + authToken.value,
