@@ -27,6 +27,10 @@ class Permissions
     const PRIORITY_SPEAKER    = 'priority_speaker';
     // Streaming
     const STREAM              = 'stream';
+    // Watch Party plugin
+    const WATCH_PARTY_PROPOSE  = 'watch_party.propose';
+    const WATCH_PARTY_MODERATE = 'watch_party.moderate';
+    const WATCH_PARTY_CONTROL  = 'watch_party.control';
 
     const ALL = [
         self::MANAGE_SERVER, self::MANAGE_ROLES, self::VIEW_AUDIT_LOG,
@@ -37,6 +41,7 @@ class Permissions
         self::JOIN_VOICE, self::SPEAK, self::VIDEO,
         self::MUTE_MEMBERS, self::DEAFEN_MEMBERS, self::MOVE_MEMBERS, self::PRIORITY_SPEAKER,
         self::STREAM,
+        self::WATCH_PARTY_PROPOSE, self::WATCH_PARTY_MODERATE, self::WATCH_PARTY_CONTROL,
     ];
 
     const CATEGORIES = [
@@ -72,6 +77,12 @@ class Permissions
         ],
         'Streaming' => [
             self::STREAM => 'Go live in stream channels',
+        ],
+        // Plugin categories are included conditionally by AdminController based on enabled plugins
+        'Watch Party' => [
+            self::WATCH_PARTY_PROPOSE  => 'Propose videos to the watch party queue',
+            self::WATCH_PARTY_MODERATE => 'Approve or reject watch party proposals',
+            self::WATCH_PARTY_CONTROL  => 'Control watch party playback (start, pause, seek)',
         ],
     ];
 

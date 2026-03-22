@@ -186,12 +186,17 @@ Route::middleware('auth.central')->group(function () {
         ->middleware('throttle:10,1');
 
     // Watch party plugin
-    Route::get('/plugins/watch-party/proposals',          [WatchPartyController::class, 'index']);
-    Route::post('/plugins/watch-party/proposals',         [WatchPartyController::class, 'propose'])
+    Route::get('/plugins/watch-party/proposals',                  [WatchPartyController::class, 'index']);
+    Route::post('/plugins/watch-party/proposals',                 [WatchPartyController::class, 'propose'])
         ->middleware('throttle:10,1');
-    Route::post('/plugins/watch-party/proposals/{id}/vote', [WatchPartyController::class, 'vote']);
-    Route::delete('/plugins/watch-party/proposals/{id}',  [WatchPartyController::class, 'destroy']);
-    Route::delete('/plugins/watch-party/proposals',       [WatchPartyController::class, 'clear']);
+    Route::post('/plugins/watch-party/proposals/{id}/vote',       [WatchPartyController::class, 'vote']);
+    Route::post('/plugins/watch-party/proposals/{id}/approve',    [WatchPartyController::class, 'approve']);
+    Route::delete('/plugins/watch-party/proposals/{id}/approve',  [WatchPartyController::class, 'reject']);
+    Route::delete('/plugins/watch-party/proposals/{id}',          [WatchPartyController::class, 'destroy']);
+    Route::delete('/plugins/watch-party/proposals',               [WatchPartyController::class, 'clear']);
+    Route::get('/plugins/watch-party/session/{channelId}',        [WatchPartyController::class, 'session']);
+    Route::post('/plugins/watch-party/session',                   [WatchPartyController::class, 'syncSession']);
+    Route::post('/plugins/watch-party/session/ready',             [WatchPartyController::class, 'sessionReady']);
 
     // Debug log — admin only, only when APP_DEBUG is true
     Route::get('/admin/debug-log', function (Request $request) {

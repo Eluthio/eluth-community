@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Plugin;
 use App\Models\Role;
 use App\Models\ServerMember;
 use App\Support\Permissions;
@@ -11,6 +12,11 @@ use Illuminate\Http\Request;
 
 class AdminController extends Controller
 {
+    /** Maps plugin slug → Permissions::CATEGORIES key that belongs to it */
+    private const PLUGIN_PERMISSION_CATEGORIES = [
+        'watch-party' => 'Watch Party',
+    ];
+
     private function requirePermission(Request $request, string $permission): void
     {
         $member = $request->attributes->get('member');
@@ -234,9 +240,22 @@ class AdminController extends Controller
             'permissions' => $r->permissions->pluck('permission'),
         ]);
 
+        // Only expose plugin-specific permission categories when that plugin is enabled
+        $categories = Permissions::CATEGORIES;
+        $pluginPermsEnabled = Plugin::whereIn('slug', array_keys(self::PLUGIN_PERMISSION_CATEGORIES))
+            ->where('is_enabled', true)
+            ->pluck('slug')
+            ->all();
+        foreach (array_keys(self::PLUGIN_PERMISSION_CATEGORIES) as $slug) {
+            if (! in_array($slug, $pluginPermsEnabled)) {
+                $category = self::PLUGIN_PERMISSION_CATEGORIES[$slug];
+                unset($categories[$category]);
+            }
+        }
+
         return response()->json([
             'roles'            => $roles,
-            'all_permissions'  => Permissions::CATEGORIES,
+            'all_permissions'  => $categories,
         ]);
     }
 
