@@ -1,8 +1,15 @@
-# CORS for plugin JS files fetched by the Electron app (file:// origin)
+# CORS — allow the Electron desktop app (file:// origin) to reach the API and storage
 <IfModule mod_headers.c>
-    <FilesMatch "\.js$">
-        Header set Access-Control-Allow-Origin "*"
-    </FilesMatch>
+    Header always set Access-Control-Allow-Origin "*"
+    Header always set Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    Header always set Access-Control-Allow-Headers "Authorization, Content-Type, Accept, X-Requested-With, X-Socket-Id"
+</IfModule>
+
+# Answer OPTIONS preflight immediately without hitting PHP
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_METHOD} OPTIONS
+    RewriteRule ^ - [R=204,L]
 </IfModule>
 
 <IfModule mod_rewrite.c>
