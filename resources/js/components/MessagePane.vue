@@ -229,7 +229,7 @@
 import { ref, computed, watch, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { gsap } from 'gsap'
 import StreamPlayer from './StreamPlayer.vue'
-import { getPlugin } from '../plugins/registry.js'
+import { getPlugin, renderMessageUrl, applyContentTransformers } from '../plugins/registry.js'
 
 const props = defineProps({
     channelName:   { type: String, default: 'general' },
@@ -243,7 +243,6 @@ const props = defineProps({
     authToken:     { type: String, default: '' },
     enabledPlugins: { type: Array,  default: () => [] },
     pluginSettings: { type: Object, default: () => ({}) },
-    customEmotes: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['send', 'kick', 'ban', 'open-dm', 'open-user-settings', 'view-profile'])
 
@@ -417,12 +416,6 @@ const memberAvatarMap = computed(() => {
 })
 
 // ── Message rendering ─────────────────────────────────────────────────────
-const emoteMap = computed(() => {
-    const map = {}
-    for (const e of props.customEmotes) map[e.name] = e
-    return map
-})
-
 function renderContent(content) {
     // Escape HTML first
     let safe = content
@@ -438,30 +431,15 @@ function renderContent(content) {
     const uploadedImgPattern = /https?:\/\/\S+\/storage\/uploads\/images\/\S+\.(jpe?g|png|gif|webp)/gi
     safe = safe.replace(uploadedImgPattern, url => `<img src="${url}" class="msg-gif msg-uploaded-img" alt="Image" loading="lazy" />`)
 
-    // 3D model links — embed interactive viewer if plugin is active, else file link
-    const modelViewerActive = props.enabledPlugins?.includes('model-viewer')
+    // 3D model links — delegate to any loaded plugin; fallback to plain file link
     const modelPattern = /https?:\/\/\S+\/storage\/uploads\/models\/[^\s"<]+\.(obj|stl|glb|gltf)(\?[^\s"<]*)?/gi
     safe = safe.replace(modelPattern, url => {
+        const pluginHtml = renderMessageUrl(url)
+        if (pluginHtml != null) return pluginHtml
         try {
             const allowDl  = url.includes('?dl=1')
             const cleanUrl = url.split('?')[0]
             const filename = cleanUrl.split('/').pop()
-
-            if (modelViewerActive) {
-                const viewerSrc = `/storage/plugins/model-viewer/viewer.html?url=${encodeURIComponent(cleanUrl)}`
-                let html = `<span class="msg-model-viewer">`
-                html += `<iframe src="${viewerSrc}" class="msg-model-iframe" frameborder="0" allowfullscreen loading="lazy" title="3D Model — ${filename}"></iframe>`
-                html += `<span class="msg-model-footer">`
-                html += `<span class="msg-model-icon">📦</span>`
-                html += `<span class="msg-model-name">${filename}</span>`
-                if (allowDl) {
-                    html += ` <a href="${cleanUrl}" download="${filename}" class="msg-model-dl" title="Download">↓</a>`
-                }
-                html += `</span></span>`
-                return html
-            }
-
-            // Fallback: plain file link (plugin not installed)
             let html = `<span class="msg-model-attach"><span class="msg-model-icon">📦</span><a href="${cleanUrl}" target="_blank" rel="noopener" class="msg-model-link">${filename}</a>`
             if (allowDl) html += ` <a href="${cleanUrl}" download="${filename}" class="msg-model-dl" title="Download">↓</a>`
             html += `</span>`
@@ -471,13 +449,8 @@ function renderContent(content) {
         }
     })
 
-    // Replace :emote_name: with custom emote images
-    safe = safe.replace(/:([a-z0-9_-]{2,32}):/g, (match, name) => {
-        const emote = emoteMap.value[name]
-        if (!emote) return match
-        const safeUrl = emote.url.replace(/"/g, '&quot;')
-        return `<img src="${safeUrl}" class="msg-emote" alt=":${name}:" title=":${name}:" loading="lazy" />`
-    })
+    // Apply plugin content transformers (e.g. custom emotes, syntax highlighting)
+    safe = applyContentTransformers(safe)
 
     // Highlight @mentions
     return safe.replace(/@(everyone|here|\w+)/g, (match, name) => {

@@ -40,3 +40,68 @@ export async function loadPlugin(slug, storageUrl) {
 export function getPlugin(slug) {
     return window.__EluthPlugins?.[slug] ?? null
 }
+
+/**
+ * Render a message URL using any loaded plugin's messageRenderer.
+ * Each plugin may declare:
+ *   messageRenderer: { pattern: RegExp, render: (url) => htmlString|null }
+ * Returns an HTML string if a plugin handles it, or null if nothing matches.
+ */
+export function renderMessageUrl(url) {
+    const plugins = window.__EluthPlugins ?? {}
+    for (const slug of Object.keys(plugins)) {
+        const mr = plugins[slug].messageRenderer
+        if (mr && mr.pattern instanceof RegExp && mr.pattern.test(url)) {
+            try {
+                const html = mr.render(url)
+                if (html != null) return html
+            } catch (e) {
+                console.warn(`[Plugin:${slug}] messageRenderer.render threw:`, e)
+            }
+        }
+    }
+    return null
+}
+
+/**
+ * Apply all plugin content transformers to a rendered HTML string.
+ * Each plugin may declare:
+ *   transformContent: (html) => transformedHtml
+ * Transformers are applied in load order.
+ */
+export function applyContentTransformers(html) {
+    const plugins = window.__EluthPlugins ?? {}
+    let result = html
+    for (const slug of Object.keys(plugins)) {
+        const transform = plugins[slug].transformContent
+        if (typeof transform === 'function') {
+            try {
+                result = transform(result) ?? result
+            } catch (e) {
+                console.warn(`[Plugin:${slug}] transformContent threw:`, e)
+            }
+        }
+    }
+    return result
+}
+
+/**
+ * Call bootstrap on every loaded plugin that declares one.
+ * Plugins use this to perform async init (e.g. fetch emote lists) and
+ * register their transformContent / messageRenderer on themselves.
+ *
+ * api: object provided by the host, e.g. { get, authToken, apiBase }
+ */
+export async function bootstrapPlugins(api) {
+    const plugins = window.__EluthPlugins ?? {}
+    for (const slug of Object.keys(plugins)) {
+        const bootstrap = plugins[slug].bootstrap
+        if (typeof bootstrap === 'function') {
+            try {
+                await bootstrap.call(plugins[slug], api)
+            } catch (e) {
+                console.warn(`[Plugin:${slug}] bootstrap threw:`, e)
+            }
+        }
+    }
+}

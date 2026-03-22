@@ -135,7 +135,6 @@
                         :auth-token="authToken"
                         :enabled-plugins="enabledPlugins"
                         :plugin-settings="pluginSettings"
-                        :custom-emotes="customEmotes"
                         @send="sendMessage"
                         @kick="kickMember"
                         @ban="banMember"
@@ -279,7 +278,7 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { gsap } from 'gsap'
 import { createEcho } from './echo.js'
 import { loadClientConfig, getConfig } from './clientConfig.js'
-import { loadPlugin } from './plugins/registry.js'
+import { loadPlugin, bootstrapPlugins } from './plugins/registry.js'
 import { useApi, ApiError } from './composables/useApi.js'
 import VideoBackground from './components/VideoBackground.vue'
 import ChannelSidebar  from './components/ChannelSidebar.vue'
@@ -343,7 +342,6 @@ function dismissWelcome() {
 // ── Plugins ────────────────────────────────────────────────────────────────
 const enabledPlugins    = ref([])   // array of slugs
 const pluginSettings    = ref({})   // { slug: { key: value } }
-const customEmotes      = ref([])
 
 // ── Auth ───────────────────────────────────────────────────────────────────
 const authenticated = ref(false)
@@ -901,15 +899,8 @@ async function loadPlugins() {
         }
         pluginSettings.value = settings
 
-        // Load custom emotes if emoticon plugin is enabled
-        if (enabledPlugins.value.includes('emoticon-picker')) {
-            try {
-                const emoteData = await get('/plugins/emoticons/emotes')
-                customEmotes.value = emoteData.emotes ?? []
-            } catch { customEmotes.value = [] }
-        } else {
-            customEmotes.value = []
-        }
+        // Let each loaded plugin bootstrap itself (fetch data, register renderers, etc.)
+        await bootstrapPlugins({ get })
     } catch { /* non-critical */ }
 }
 
