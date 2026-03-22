@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\MemberController;
 use App\Http\Controllers\Api\PluginController;
 use App\Http\Controllers\Api\StreamController;
+use App\Http\Controllers\Api\PollController;
 use App\Http\Controllers\Api\WatchPartyController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -184,6 +185,12 @@ Route::middleware('auth.central')->group(function () {
     // 3D model viewer plugin
     Route::post('/plugins/model-viewer/upload', [PluginController::class, 'modelUpload'])
         ->middleware('throttle:10,1');
+
+    // Polls plugin
+    Route::get('/plugins/polls/active',          [PollController::class, 'active']);
+    Route::post('/plugins/polls',                [PollController::class, 'create'])->middleware('throttle:5,1');
+    Route::post('/plugins/polls/{id}/vote',      [PollController::class, 'vote']);
+    Route::post('/plugins/polls/{id}/close',     [PollController::class, 'close']);
 
     // Watch party plugin
     Route::get('/plugins/watch-party/proposals',                  [WatchPartyController::class, 'index']);

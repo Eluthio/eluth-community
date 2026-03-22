@@ -14,6 +14,7 @@ class AdminController extends Controller
 {
     /** Maps plugin slug → Permissions::CATEGORIES key that belongs to it */
     private const PLUGIN_PERMISSION_CATEGORIES = [
+        'polls'       => 'Polls',
         'watch-party' => 'Watch Party',
     ];
 
