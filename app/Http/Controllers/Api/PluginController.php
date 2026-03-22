@@ -185,14 +185,19 @@ class PluginController extends Controller
         $zip->close();
         @unlink($tmpZip);
 
-        // Upsert plugin record
-        Plugin::updateOrCreate(['slug' => $slug], [
+        // Upsert plugin record — preserve is_enabled on updates; default false for new installs
+        $existing = Plugin::find($slug);
+        $record = [
             'name'       => $manifest['name'],
             'tier'       => $tier,
-            'manifest'   => array_merge($manifest, ['version' => $manifest['version']]),
+            'manifest'   => $manifest,
             'source_url' => $url,
-            'is_enabled' => false,
-        ]);
+        ];
+        if ($existing) {
+            $existing->update($record);
+        } else {
+            Plugin::create(array_merge($record, ['slug' => $slug, 'is_enabled' => false]));
+        }
 
         return response()->json(['ok' => true, 'slug' => $slug, 'name' => $manifest['name']]);
     }
