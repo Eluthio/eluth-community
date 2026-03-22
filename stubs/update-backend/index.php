@@ -1011,9 +1011,8 @@ function installPluginFromUrl(string $url): ?string
         if ($item->isDir()) { if (!is_dir($target)) mkdir($target, 0755, true); }
         else copy($item->getPathname(), $target);
     }
-    rmdirRecursive($extract);
-
     // Run schema.sql if present (CREATE TABLE IF NOT EXISTS statements only)
+    // Must happen before rmdirRecursive — $root is inside $extract
     $schemaPath = $root . '/schema.sql';
     $db = getDB();
     if (file_exists($schemaPath)) {
@@ -1026,6 +1025,8 @@ function installPluginFromUrl(string $url): ?string
             }
         }
     }
+
+    rmdirRecursive($extract);
 
     // Upsert plugin DB row
     $db->prepare(
