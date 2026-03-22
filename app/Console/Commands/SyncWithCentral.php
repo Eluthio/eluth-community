@@ -22,8 +22,14 @@ class SyncWithCentral extends Command
             return self::SUCCESS;
         }
 
+        $version          = trim(file_get_contents(base_path('VERSION')) ?: '0.0.0');
+        $installedPlugins = DB::table('plugins')->where('is_enabled', true)->pluck('slug')->all();
+
         try {
-            $response = Http::timeout(8)->post($centralUrl . '/api/operators/' . $operatorId . '/ping');
+            $response = Http::timeout(8)->post($centralUrl . '/api/operators/' . $operatorId . '/ping', [
+                'version'           => $version,
+                'installed_plugins' => $installedPlugins,
+            ]);
         } catch (\Throwable $e) {
             Log::warning('server:sync — could not reach central server: ' . $e->getMessage());
             $this->error('Could not reach central server: ' . $e->getMessage());
@@ -57,6 +63,12 @@ class SyncWithCentral extends Command
             );
             Log::info("server:sync — server name updated: \"{$currentName}\" → \"{$centralName}\"");
             $this->info("Server name updated: \"{$currentName}\" → \"{$centralName}\"");
+        }
+
+        // Apply debug settings from central
+        if (isset($data['debug_enabled'])) {
+            \Illuminate\Support\Facades\Cache::put('eluth_debug_enabled', (bool) $data['debug_enabled'], now()->addDay());
+            \Illuminate\Support\Facades\Cache::put('eluth_debug_level', $data['debug_level'] ?? null, now()->addDay());
         }
 
         // Warn if subscription has lapsed
