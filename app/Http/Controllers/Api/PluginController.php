@@ -268,7 +268,7 @@ class PluginController extends Controller
     public function modelUpload(Request $request): JsonResponse
     {
         $request->validate([
-            'model' => ['required', 'file', 'mimes:obj,stl,glb,gltf', 'max:51200'],
+            'model' => ['required', 'file', 'max:51200'],
         ]);
 
         $file = $request->file('model');
