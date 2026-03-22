@@ -119,6 +119,13 @@
                 <button class="gif-attachment-remove" @click="pendingGif = null" title="Remove GIF">✕</button>
             </div>
 
+            <!-- 3D model attachment preview -->
+            <div v-if="pendingModel" class="model-attachment">
+                <span class="model-attachment-icon">📦</span>
+                <span class="model-attachment-name" :title="pendingModel.filename">{{ pendingModel.filename }}</span>
+                <button class="model-attachment-remove" @click="pendingModel = null" title="Remove model">✕</button>
+            </div>
+
             <div class="message-input-wrap">
                 <button class="input-action" title="Attach" style="font-size:19px;">⊕</button>
                 <textarea
@@ -431,14 +438,20 @@ function renderContent(content) {
     const uploadedImgPattern = /https?:\/\/\S+\/storage\/uploads\/images\/\S+\.(jpe?g|png|gif|webp)/gi
     safe = safe.replace(uploadedImgPattern, url => `<img src="${url}" class="msg-gif msg-uploaded-img" alt="Image" loading="lazy" />`)
 
-    // 3D model links — render as an open button
-    const modelPattern = /https?:\/\/(\S+)\/storage\/uploads\/models\/(\S+\.(obj|stl|glb|gltf))/gi
+    // 3D model links — render as a file link with optional download button
+    const modelPattern = /https?:\/\/\S+\/storage\/uploads\/models\/[^\s"<]+\.(obj|stl|glb|gltf)(\?[^\s"<]*)?/gi
     safe = safe.replace(modelPattern, url => {
         try {
-            const { origin } = new URL(url)
-            const viewerUrl = `${origin}/3d-viewer?model=${encodeURIComponent(url)}`
-            const filename  = url.split('/').pop()
-            return `<a href="${viewerUrl}" target="_blank" rel="noopener" class="msg-model-link">📦 View 3D Model · ${filename}</a>`
+            const urlObj      = new URL(url)
+            const allowDl     = urlObj.searchParams.get('dl') === '1'
+            const cleanUrl    = url.split('?')[0]
+            const filename    = cleanUrl.split('/').pop()
+            let html = `<span class="msg-model-attach"><span class="msg-model-icon">📦</span><a href="${cleanUrl}" target="_blank" rel="noopener" class="msg-model-link">${filename}</a>`
+            if (allowDl) {
+                html += ` <a href="${cleanUrl}" download="${filename}" class="msg-model-dl" title="Download">↓</a>`
+            }
+            html += `</span>`
+            return html
         } catch {
             return url
         }
@@ -692,7 +705,8 @@ onUnmounted(() => {
 function onDocEsc(e) { if (e.key === 'Escape') { closeMenu(); closeMention() } }
 
 // ── Plugin input zone ─────────────────────────────────────────────────────
-const pendingGif = ref(null)
+const pendingGif   = ref(null)
+const pendingModel = ref(null)  // { url, filename }
 
 const activeInputPlugins = computed(() =>
     props.enabledPlugins
@@ -702,8 +716,13 @@ const activeInputPlugins = computed(() =>
 )
 
 // Single handler for all input-zone plugin @insert events.
-// GIF URLs start with http; everything else is inserted as text at cursor.
 function insertFromPlugin(value) {
+    if (typeof value === 'string' && /\/storage\/uploads\/models\//.test(value)) {
+        const filename = value.split('/').pop().split('?')[0]
+        pendingModel.value = { url: value, filename }
+        nextTick(() => inputEl.value?.focus())
+        return
+    }
     if (typeof value === 'string' && (value.startsWith('http://') || value.startsWith('https://'))) {
         pendingGif.value = value
         nextTick(() => inputEl.value?.focus())
@@ -724,18 +743,20 @@ function insertFromPlugin(value) {
 
 // ── Send ──────────────────────────────────────────────────────────────────
 function send() {
-    const text = draft.value.trim()
-    const gif  = pendingGif.value
+    const text  = draft.value.trim()
+    const gif   = pendingGif.value
+    const model = pendingModel.value?.url ?? null
 
-    if (!text && !gif) return
+    if (!text && !gif && !model) return
 
-    // Combine text and GIF URL — GIF goes on its own line after any text
-    const content = [text, gif].filter(Boolean).join('\n')
+    // Combine text, GIF URL, and model URL — each on its own line
+    const content = [text, gif, model].filter(Boolean).join('\n')
 
     emit('send', { content, replyToId: replyTo.value?.id ?? null })
-    draft.value    = ''
-    pendingGif.value = null
-    replyTo.value  = null
+    draft.value        = ''
+    pendingGif.value   = null
+    pendingModel.value = null
+    replyTo.value      = null
     closeMention()
     nextTick(() => { if (inputEl.value) inputEl.value.style.height = 'auto' })
 }
@@ -778,11 +799,29 @@ watch(() => props.messages.length, async () => {
     cursor: pointer;
 }
 .msg-uploaded-img:hover { opacity: .9; }
-:deep(.msg-model-link) {
+:deep(.msg-model-attach) {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     margin-top: 4px;
+    background: rgba(167,139,250,.08);
+    border: 1px solid rgba(167,139,250,.2);
+    border-radius: 8px;
+    padding: 5px 10px;
+}
+:deep(.msg-model-icon) { font-size: 16px; }
+:deep(.msg-model-dl) {
+    color: rgba(167,139,250,.7);
+    text-decoration: none;
+    font-size: 13px;
+    padding: 0 2px;
+}
+:deep(.msg-model-dl):hover { color: #a78bfa; }
+:deep(.msg-model-link) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 0;
     padding: 7px 12px;
     background: rgba(167,139,250,.1);
     border: 1px solid rgba(167,139,250,.25);
@@ -832,6 +871,37 @@ watch(() => props.messages.length, async () => {
     cursor: pointer;
     padding: 0;
 }
+
+.model-attachment {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 12px 0;
+    background: rgba(167,139,250,.1);
+    border: 1px solid rgba(167,139,250,.25);
+    border-radius: 8px;
+    padding: 6px 10px;
+}
+.model-attachment-icon { font-size: 16px; }
+.model-attachment-name {
+    font-size: 12px;
+    color: rgba(255,255,255,.75);
+    max-width: 200px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.model-attachment-remove {
+    background: none;
+    border: none;
+    color: rgba(255,255,255,.35);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0 2px;
+    line-height: 1;
+    margin-left: 2px;
+}
+.model-attachment-remove:hover { color: #f87171; }
 
 .stream-zone {
     display: flex;
