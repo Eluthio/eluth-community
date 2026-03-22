@@ -129,6 +129,17 @@ if (($_POST['act'] ?? '') === 'install_plugin') {
     exit;
 }
 
+if (($_POST['act'] ?? '') === 'update_plugin') {
+    $url = trim($_POST['url'] ?? '');
+    $err = installPluginFromUrl($url);
+    if ($err) {
+        header('Location: ?step=plugins&err=' . urlencode($err));
+    } else {
+        header('Location: ?step=plugins&msg=' . urlencode('Plugin updated successfully.'));
+    }
+    exit;
+}
+
 
 if (($_POST['act'] ?? '') === 'uninstall_plugin') {
     $slug = preg_replace('/[^a-z0-9_-]/', '', $_POST['slug'] ?? '');
@@ -972,6 +983,17 @@ function installPluginFromUrl(string $url): ?string
         if (empty($manifest[$req])) { rmdirRecursive($extract); return "plugin.json missing required field: {$req}"; }
     }
 
+    // Check min/max server version requirements
+    $serverVersion = currentVersion();
+    if (!empty($manifest['min_server_version']) && version_compare($serverVersion, $manifest['min_server_version'], '<')) {
+        rmdirRecursive($extract);
+        return "Please update your community server before installing this plugin (requires v{$manifest['min_server_version']}+, you are on v{$serverVersion}).";
+    }
+    if (!empty($manifest['max_server_version']) && version_compare($serverVersion, $manifest['max_server_version'], '>')) {
+        rmdirRecursive($extract);
+        return "Please update this plugin before installing — it has not been updated to support your server version (supports up to v{$manifest['max_server_version']}, you are on v{$serverVersion}).";
+    }
+
     $slug = preg_replace('/[^a-z0-9_-]/', '', strtolower($manifest['slug']));
     if (!$slug) { rmdirRecursive($extract); return 'Invalid plugin slug.'; }
 
@@ -1063,6 +1085,12 @@ function pagePlugins(): void
         $catalogueErr = 'CENTRAL_SERVER_URL not set in .env.';
     }
 
+    // Build catalogue lookup by slug for quick access
+    $catalogueBySlug = [];
+    foreach ($catalogue as $p) {
+        $catalogueBySlug[$p['slug']] = $p;
+    }
+
     // Split catalogue: available = not yet installed
     $available = array_values(array_filter($catalogue, fn($p) => !in_array($p['slug'], $installedSlugs)));
     usort($available, fn($a, $b) => ($b['recommended'] <=> $a['recommended']) ?: strcmp($a['name'], $b['name']));
@@ -1088,9 +1116,15 @@ function pagePlugins(): void
     <?php if (empty($installed)): ?>
         <div class="empty">No plugins installed yet. Browse the store below.</div>
     <?php else: foreach ($installed as $plugin):
-        $manifest   = json_decode($plugin->manifest ?? '{}', true) ?? [];
-        $settings   = $manifest['settings'] ?? [];
-        $isEnabled  = (bool) $plugin->is_enabled;
+        $manifest         = json_decode($plugin->manifest ?? '{}', true) ?? [];
+        $settings         = $manifest['settings'] ?? [];
+        $isEnabled        = (bool) $plugin->is_enabled;
+        $catalogueEntry   = $catalogueBySlug[$plugin->slug] ?? null;
+        $installedVersion = $manifest['version'] ?? null;
+        $catalogueVersion = $catalogueEntry['version'] ?? null;
+        $hasUpdate        = $installedVersion && $catalogueVersion
+                            && version_compare($catalogueVersion, $installedVersion, '>');
+        $updateZipUrl     = $hasUpdate ? ($catalogueEntry['github_zip_url'] ?? null) : null;
 
         $settingValues = [];
         if ($settings) {
@@ -1107,8 +1141,11 @@ function pagePlugins(): void
             <div class="plugin-meta">
                 <span class="plugin-name"><?= htmlspecialchars($plugin->name) ?></span>
                 <span class="plugin-badge plugin-badge--<?= htmlspecialchars($plugin->tier) ?>"><?= htmlspecialchars($plugin->tier) ?></span>
-                <?php if ($manifest['version'] ?? null): ?>
-                    <span class="plugin-ver">v<?= htmlspecialchars($manifest['version']) ?></span>
+                <?php if ($installedVersion): ?>
+                    <span class="plugin-ver">v<?= htmlspecialchars($installedVersion) ?></span>
+                <?php endif; ?>
+                <?php if ($hasUpdate && $catalogueVersion): ?>
+                    <span class="plugin-ver plugin-ver--update">→ v<?= htmlspecialchars($catalogueVersion) ?> available</span>
                 <?php endif; ?>
                 <span class="plugin-status-dot <?= $isEnabled ? 'dot--on' : 'dot--off' ?>"></span>
                 <span class="plugin-status-label"><?= $isEnabled ? 'Enabled' : 'Disabled' ?></span>
@@ -1128,6 +1165,13 @@ function pagePlugins(): void
                         <input type="hidden" name="act" value="enable_plugin">
                         <input type="hidden" name="slug" value="<?= htmlspecialchars($plugin->slug) ?>">
                         <button class="btn btn--primary btn--sm">Enable</button>
+                    </form>
+                <?php endif; ?>
+                <?php if ($hasUpdate && $updateZipUrl): ?>
+                    <form method="POST" style="margin:0" onsubmit="return confirm('Update <?= htmlspecialchars(addslashes($plugin->name)) ?> to v<?= htmlspecialchars($catalogueVersion) ?>?')">
+                        <input type="hidden" name="act" value="update_plugin">
+                        <input type="hidden" name="url" value="<?= htmlspecialchars($updateZipUrl) ?>">
+                        <button class="btn btn--warning btn--sm">Update</button>
                     </form>
                 <?php endif; ?>
                 <?php $hasTeardown = file_exists(BASE . '/storage/app/public/plugins/' . $plugin->slug . '/teardown.sql'); ?>
@@ -1186,9 +1230,16 @@ function pagePlugins(): void
         <?php endif; ?>
 
         <div class="store-grid" id="store-grid">
-        <?php foreach ($available as $p):
+        <?php
+        $serverVer = currentVersion();
+        foreach ($available as $p):
             $tags    = $p['tags'] ?? [];
             $tagsJson = htmlspecialchars(json_encode($tags), ENT_QUOTES);
+            $minVer    = $p['min_server_version'] ?? null;
+            $maxVer    = $p['max_server_version'] ?? null;
+            $tooOld    = $minVer && version_compare($serverVer, $minVer, '<');
+            $tooNew    = $maxVer && version_compare($serverVer, $maxVer, '>');
+            $versionOk = !$tooOld && !$tooNew;
         ?>
             <div class="store-card"
                  data-name="<?= htmlspecialchars(strtolower($p['name'])) ?>"
@@ -1224,7 +1275,11 @@ function pagePlugins(): void
                         <?php if ($p['homepage'] ?? null): ?>
                             <a href="<?= htmlspecialchars($p['homepage']) ?>" target="_blank" rel="noopener" class="btn btn--ghost btn--sm">Docs</a>
                         <?php endif; ?>
-                        <?php if ($p['github_zip_url'] ?? null): ?>
+                        <?php if ($tooOld): ?>
+                            <span class="muted" style="font-size:12px;">Please update your server to v<?= htmlspecialchars($minVer) ?>+ to install this plugin</span>
+                        <?php elseif ($tooNew): ?>
+                            <span class="muted" style="font-size:12px;">Please update this plugin — not yet compatible with your server version</span>
+                        <?php elseif ($p['github_zip_url'] ?? null): ?>
                             <form method="POST" style="margin:0">
                                 <input type="hidden" name="act" value="install_plugin">
                                 <input type="hidden" name="url" value="<?= htmlspecialchars($p['github_zip_url']) ?>">
@@ -1358,6 +1413,7 @@ a{color:#22d3ee;text-decoration:none}
 .btn--primary{background:#22d3ee;color:#050810}.btn--primary:hover:not(:disabled){background:#67e8f9}
 .btn--ghost{background:rgba(255,255,255,.06);color:rgba(255,255,255,.8)}.btn--ghost:hover{background:rgba(255,255,255,.1)}
 .btn--danger{background:rgba(248,113,113,.2);color:#f87171}.btn--danger:hover:not(:disabled){background:rgba(248,113,113,.35)}
+.btn--warning{background:rgba(251,191,36,.2);color:#fcd34d}.btn--warning:hover:not(:disabled){background:rgba(251,191,36,.35)}
 .btn--sm{padding:5px 12px;font-size:12px}
 .btn:disabled{opacity:.4;cursor:not-allowed}
 .action-bar{display:flex;gap:10px;align-items:center;margin-top:24px}
@@ -1401,7 +1457,7 @@ code{background:rgba(255,255,255,.06);border-radius:3px;padding:1px 5px;font-siz
 .plugin-badge--official{background:rgba(34,211,238,.15);color:#67e8f9}
 .plugin-badge--approved{background:rgba(52,211,153,.15);color:#6ee7b7}
 .plugin-badge--community{background:rgba(251,191,36,.12);color:#fcd34d}
-.plugin-ver{font-size:11px;color:rgba(255,255,255,.3);font-family:monospace}
+.plugin-ver{font-size:11px;color:rgba(255,255,255,.3);font-family:monospace}.plugin-ver--update{color:#fcd34d}
 .plugin-desc{font-size:13px;color:rgba(255,255,255,.5);margin-top:2px}
 .plugin-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
 .plugin-settings{border-top:1px solid rgba(255,255,255,.06);margin-top:14px;padding-top:14px}
