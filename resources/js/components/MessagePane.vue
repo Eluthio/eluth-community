@@ -438,18 +438,32 @@ function renderContent(content) {
     const uploadedImgPattern = /https?:\/\/\S+\/storage\/uploads\/images\/\S+\.(jpe?g|png|gif|webp)/gi
     safe = safe.replace(uploadedImgPattern, url => `<img src="${url}" class="msg-gif msg-uploaded-img" alt="Image" loading="lazy" />`)
 
-    // 3D model links — render as a file link with optional download button
+    // 3D model links — embed interactive viewer if plugin is active, else file link
+    const modelViewerActive = props.enabledPlugins?.includes('model-viewer')
     const modelPattern = /https?:\/\/\S+\/storage\/uploads\/models\/[^\s"<]+\.(obj|stl|glb|gltf)(\?[^\s"<]*)?/gi
     safe = safe.replace(modelPattern, url => {
         try {
-            const urlObj      = new URL(url)
-            const allowDl     = urlObj.searchParams.get('dl') === '1'
-            const cleanUrl    = url.split('?')[0]
-            const filename    = cleanUrl.split('/').pop()
-            let html = `<span class="msg-model-attach"><span class="msg-model-icon">📦</span><a href="${cleanUrl}" target="_blank" rel="noopener" class="msg-model-link">${filename}</a>`
-            if (allowDl) {
-                html += ` <a href="${cleanUrl}" download="${filename}" class="msg-model-dl" title="Download">↓</a>`
+            const allowDl  = url.includes('?dl=1')
+            const cleanUrl = url.split('?')[0]
+            const filename = cleanUrl.split('/').pop()
+
+            if (modelViewerActive) {
+                const viewerSrc = `/storage/plugins/model-viewer/viewer.html?url=${encodeURIComponent(cleanUrl)}`
+                let html = `<span class="msg-model-viewer">`
+                html += `<iframe src="${viewerSrc}" class="msg-model-iframe" frameborder="0" allowfullscreen loading="lazy" title="3D Model — ${filename}"></iframe>`
+                html += `<span class="msg-model-footer">`
+                html += `<span class="msg-model-icon">📦</span>`
+                html += `<span class="msg-model-name">${filename}</span>`
+                if (allowDl) {
+                    html += ` <a href="${cleanUrl}" download="${filename}" class="msg-model-dl" title="Download">↓</a>`
+                }
+                html += `</span></span>`
+                return html
             }
+
+            // Fallback: plain file link (plugin not installed)
+            let html = `<span class="msg-model-attach"><span class="msg-model-icon">📦</span><a href="${cleanUrl}" target="_blank" rel="noopener" class="msg-model-link">${filename}</a>`
+            if (allowDl) html += ` <a href="${cleanUrl}" download="${filename}" class="msg-model-dl" title="Download">↓</a>`
             html += `</span>`
             return html
         } catch {
@@ -799,6 +813,47 @@ watch(() => props.messages.length, async () => {
     cursor: pointer;
 }
 .msg-uploaded-img:hover { opacity: .9; }
+/* 3D model viewer (plugin active) */
+:deep(.msg-model-viewer) {
+    display: block;
+    margin-top: 6px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid rgba(167,139,250,.2);
+    background: #12141c;
+    max-width: 480px;
+}
+:deep(.msg-model-iframe) {
+    display: block;
+    width: 100%;
+    height: 300px;
+    border: none;
+}
+:deep(.msg-model-footer) {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: rgba(167,139,250,.06);
+    border-top: 1px solid rgba(167,139,250,.12);
+}
+:deep(.msg-model-icon) { font-size: 14px; }
+:deep(.msg-model-name) {
+    flex: 1;
+    font-size: 12px;
+    color: rgba(255,255,255,.5);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+:deep(.msg-model-dl) {
+    color: rgba(167,139,250,.7);
+    text-decoration: none;
+    font-size: 13px;
+    padding: 0 2px;
+}
+:deep(.msg-model-dl):hover { color: #a78bfa; }
+/* Fallback: plain file link (plugin not installed) */
 :deep(.msg-model-attach) {
     display: inline-flex;
     align-items: center;
@@ -809,30 +864,13 @@ watch(() => props.messages.length, async () => {
     border-radius: 8px;
     padding: 5px 10px;
 }
-:deep(.msg-model-icon) { font-size: 16px; }
-:deep(.msg-model-dl) {
-    color: rgba(167,139,250,.7);
-    text-decoration: none;
-    font-size: 13px;
-    padding: 0 2px;
-}
-:deep(.msg-model-dl):hover { color: #a78bfa; }
 :deep(.msg-model-link) {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 0;
-    padding: 7px 12px;
-    background: rgba(167,139,250,.1);
-    border: 1px solid rgba(167,139,250,.25);
-    border-radius: 8px;
     color: #a78bfa;
     text-decoration: none;
     font-size: 13px;
     font-weight: 500;
-    transition: all .15s;
 }
-:deep(.msg-model-link):hover { background: rgba(167,139,250,.18); border-color: rgba(167,139,250,.4); }
+:deep(.msg-model-link):hover { text-decoration: underline; }
 
 .msg-emote {
     display: inline-block;
