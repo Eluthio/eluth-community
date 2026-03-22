@@ -145,6 +145,9 @@ if (($_POST['act'] ?? '') === 'install_official_plugin') {
     ]);
     try {
         $db = getDB();
+        foreach ($info['setup_sql'] ?? [] as $sql) {
+            $db->exec($sql);
+        }
         $db->prepare(
             "INSERT IGNORE INTO plugins (slug, name, tier, manifest, is_enabled, created_at, updated_at)
              VALUES (?, ?, 'official', ?, 0, NOW(), NOW())"
@@ -974,6 +977,25 @@ function officialPlugins(): array
             'name'        => 'Watch Party',
             'description' => 'Propose links, vote on what to watch next, and enjoy together.',
             'settings'    => [],
+            'setup_sql'   => [
+                "CREATE TABLE IF NOT EXISTS watch_proposals (
+                    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    channel_id VARCHAR(255) NOT NULL,
+                    url TEXT NOT NULL,
+                    title VARCHAR(255) NULL,
+                    proposed_by VARCHAR(255) NOT NULL,
+                    proposed_by_id VARCHAR(255) NOT NULL,
+                    created_at TIMESTAMP NULL,
+                    updated_at TIMESTAMP NULL,
+                    INDEX idx_channel (channel_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+                "CREATE TABLE IF NOT EXISTS watch_votes (
+                    proposal_id BIGINT UNSIGNED NOT NULL,
+                    voter_id VARCHAR(255) NOT NULL,
+                    PRIMARY KEY (proposal_id, voter_id),
+                    FOREIGN KEY (proposal_id) REFERENCES watch_proposals(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+            ],
         ],
     ];
 }
@@ -1058,8 +1080,21 @@ function installPluginFromUrl(string $url): ?string
     }
     rmdirRecursive($extract);
 
-    // Upsert plugin DB row
+    // Run schema.sql if present (CREATE TABLE IF NOT EXISTS statements only)
+    $schemaPath = $root . '/schema.sql';
     $db = getDB();
+    if (file_exists($schemaPath)) {
+        $schemaSql = file_get_contents($schemaPath);
+        // Split on semicolons and run each non-empty statement
+        foreach (array_filter(array_map('trim', explode(';', $schemaSql))) as $stmt) {
+            // Only allow CREATE TABLE / CREATE INDEX statements for safety
+            if (preg_match('/^\s*CREATE\s+(TABLE|INDEX|UNIQUE\s+INDEX)\s+IF\s+NOT\s+EXISTS\s/i', $stmt)) {
+                $db->exec($stmt);
+            }
+        }
+    }
+
+    // Upsert plugin DB row
     $db->prepare(
         "INSERT INTO plugins (slug, name, tier, manifest, is_enabled, created_at, updated_at)
          VALUES (?, ?, ?, ?, 0, NOW(), NOW())
