@@ -902,7 +902,21 @@ async function loadPlugins() {
         pluginSettings.value = settings
 
         // Let each loaded plugin bootstrap itself (fetch data, register renderers, etc.)
-        await bootstrapPlugins({ get })
+        const apiBase = '/api'
+        const upload = async (path, formData) => {
+            const token = localStorage.getItem('eluth_token') ?? ''
+            const res = await fetch(apiBase + path, {
+                method: 'POST',
+                headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' },
+                body: formData,
+            })
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}))
+                throw new Error(data.message ?? `Upload failed: HTTP ${res.status}`)
+            }
+            return res.json()
+        }
+        await bootstrapPlugins({ get, post, apiBase, upload })
     } catch { /* non-critical */ }
 }
 
