@@ -874,17 +874,14 @@ async function loadPlugins() {
     try {
         const data = await get('/plugins')
         const storageUrl = getConfig().storageUrl ?? (window.location.origin + '/storage')
-        const originUrl  = window.location.origin
 
-        // Official plugins are bundled with the community server (served from /plugins/)
-        // Third-party plugins are installed to storage
+        // All plugins live in storage — installed via the plugin store
         await Promise.allSettled(
             (data.plugins ?? [])
                 .filter(p => p.is_enabled)
                 .map(p => {
-                    const baseUrl = p.tier === 'official' ? originUrl : storageUrl
-                    const entry   = p.manifest?.entry ?? 'index.js'
-                    return loadPlugin(p.slug, baseUrl, entry)
+                    const entry = p.manifest?.entry ?? 'index.js'
+                    return loadPlugin(p.slug, storageUrl, entry)
                         .catch(e => console.warn(`[plugins] Failed to load "${p.slug}":`, e))
                 })
         )

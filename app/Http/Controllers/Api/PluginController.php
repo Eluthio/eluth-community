@@ -140,19 +140,21 @@ class PluginController extends Controller
             return response()->json(['message' => 'Only approved or unofficial plugins can be installed.'], 422);
         }
 
-        // Verify Tier 2 key with central
+        // Verify approved plugins with central
+        // plugin.json must include plugin_key (raw key issued on approval) and manifest_hash
         if ($tier === 'approved') {
-            $eluthKey = $manifest['eluth_key'] ?? '';
-            if (! $eluthKey) {
+            $pluginKey    = $manifest['plugin_key']    ?? '';
+            $manifestHash = $manifest['manifest_hash'] ?? '';
+            if (! $pluginKey || ! $manifestHash) {
                 $zip->close(); @unlink($tmpZip);
-                return response()->json(['message' => 'Approved plugins must have an eluth_key.'], 422);
+                return response()->json(['message' => 'Approved plugins must include plugin_key and manifest_hash in plugin.json.'], 422);
             }
             $centralUrl = config('services.central.url', '');
             try {
                 $verify = \Http::timeout(6)->post($centralUrl . '/api/plugins/verify', [
-                    'slug'      => $slug,
-                    'eluth_key' => $eluthKey,
-                    'manifest'  => $manifest,
+                    'slug'          => $slug,
+                    'plugin_key'    => $pluginKey,
+                    'manifest_hash' => $manifestHash,
                 ]);
                 if (! $verify->ok() || ! $verify->json('valid')) {
                     $zip->close(); @unlink($tmpZip);
