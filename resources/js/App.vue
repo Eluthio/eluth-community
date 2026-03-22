@@ -131,7 +131,7 @@
                         :current-member="currentMemberProxy"
                         :channel="activeChannel"
                         :can-stream="currentMemberProxy?.can('stream') ?? false"
-                        api-base=""
+                        api-base="/api"
                         :auth-token="authToken"
                         :enabled-plugins="enabledPlugins"
                         :plugin-settings="pluginSettings"
