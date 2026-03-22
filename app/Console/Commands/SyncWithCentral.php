@@ -71,11 +71,19 @@ class SyncWithCentral extends Command
             \Illuminate\Support\Facades\Cache::put('eluth_debug_level', $data['debug_level'] ?? null, now()->addDay());
         }
 
+        // Cache IP lock state
+        $ipLocked = (bool) ($data['ip_locked'] ?? false);
+        \Illuminate\Support\Facades\Cache::put('eluth_ip_locked', $ipLocked, now()->addDay());
+        if ($ipLocked) {
+            Log::error('server:sync — server is IP-locked. SSO and bootstrap are disabled. Update your registered server IP at eluth.io.');
+            $this->error('WARNING: This server is IP-locked. Members cannot log in via SSO. Update your registered IP at eluth.io.');
+        }
+
         // Warn if subscription has lapsed
-        if (isset($data['is_active']) && ! $data['is_active']) {
+        if (isset($data['is_active']) && ! $data['is_active'] && ! $ipLocked) {
             Log::error('server:sync — subscription is no longer active (status: ' . ($data['subscription_status'] ?? 'unknown') . ')');
             $this->error('WARNING: This server\'s subscription is no longer active. Members may lose access.');
-        } else {
+        } elseif (! $ipLocked) {
             $this->info('Sync complete. Subscription active.');
         }
 
