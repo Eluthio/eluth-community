@@ -289,6 +289,82 @@ class PluginController extends Controller
         return response()->json(['url' => $url]);
     }
 
+    // ── File Manager ──────────────────────────────────────────────────────────
+
+    /**
+     * GET /api/plugins/file-manager/files?channel_id=&q=&page=
+     * Scans messages for storage upload URLs and returns paginated file metadata.
+     */
+    public function fileManagerFiles(Request $request): JsonResponse
+    {
+        $channelId = $request->query('channel_id');
+        $q         = trim((string) $request->query('q', ''));
+        $page      = max(1, (int) $request->query('page', 1));
+        $perPage   = 40;
+
+        // Pattern matches any URL pointing into /storage/uploads/
+        $uploadPattern = '%/storage/uploads/%';
+
+        $query = \DB::table('messages')
+            ->where('content', 'like', $uploadPattern);
+
+        if ($channelId) {
+            $query->where('channel_id', $channelId);
+        }
+
+        if ($q !== '') {
+            $query->where('content', 'like', '%' . $q . '%');
+        }
+
+        $rows = $query
+            ->orderByDesc('created_at')
+            ->offset(($page - 1) * $perPage)
+            ->limit($perPage + 1)
+            ->get(['id', 'username', 'content', 'created_at']);
+
+        $hasMore = $rows->count() > $perPage;
+        $rows    = $rows->take($perPage);
+
+        // Extract all upload URLs from each message content
+        $files = [];
+        $urlPattern = '/https?:\/\/\S+\/storage\/uploads\/[^\s"<]+/i';
+
+        foreach ($rows as $row) {
+            preg_match_all($urlPattern, $row->content, $matches);
+            foreach ($matches[0] as $url) {
+                $clean    = strtok($url, '?');
+                $filename = basename($clean);
+                $ext      = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+
+                $type = match(true) {
+                    in_array($ext, ['jpg','jpeg','png','gif','webp']) => 'image',
+                    in_array($ext, ['obj','stl','glb','gltf'])        => 'model',
+                    in_array($ext, ['mp4','webm','mov'])              => 'video',
+                    default                                            => 'file',
+                };
+
+                // Only include files matching search query if one was given
+                if ($q !== '' && stripos($filename, $q) === false) continue;
+
+                $files[] = [
+                    'url'        => $clean,
+                    'filename'   => $filename,
+                    'type'       => $type,
+                    'ext'        => $ext,
+                    'posted_by'  => $row->username,
+                    'posted_at'  => $row->created_at,
+                    'message_id' => $row->id,
+                ];
+            }
+        }
+
+        return response()->json([
+            'files'    => $files,
+            'page'     => $page,
+            'has_more' => $hasMore,
+        ]);
+    }
+
     private function giphyRequest(string $type, string $query): JsonResponse
     {
         $key = \DB::table('server_settings')->where('key', 'plugin_gif-picker_giphy_key')->value('value');

@@ -69,7 +69,40 @@
             </div>
         </template>
 
-        <div id="messages" ref="messagesEl">
+        <!-- Plugin top-menu bar — hidden when no plugins use the topmenu zone -->
+        <div v-if="activeTopMenuPlugins.length" class="plugin-topmenu">
+            <button
+                class="plugin-topmenu-tab"
+                :class="{ active: activeTopMenuTab === null }"
+                @click="activeTopMenuTab = null"
+            >Chat</button>
+            <button
+                v-for="p in activeTopMenuPlugins"
+                :key="p.slug"
+                class="plugin-topmenu-tab"
+                :class="{ active: activeTopMenuTab === p.slug }"
+                @click="activeTopMenuTab = p.slug"
+            >{{ p.label }}</button>
+        </div>
+
+        <!-- Plugin topmenu panels (replaces message list when a tab is active) -->
+        <template v-if="activeTopMenuTab">
+            <component
+                v-for="p in activeTopMenuPlugins"
+                v-show="activeTopMenuTab === p.slug"
+                :key="p.slug"
+                :is="p.component"
+                class="plugin-topmenu-panel"
+                :settings="pluginSettings[p.slug] ?? {}"
+                :api-base="props.apiBase"
+                :auth-token="props.authToken"
+                :channel-id="props.channel?.id ?? ''"
+                :current-member="props.currentMember"
+                @insert="insertFromPlugin"
+            />
+        </template>
+
+        <div v-show="!activeTopMenuTab" id="messages" ref="messagesEl">
             <div v-if="visibleGroups.length === 0" class="empty-state">
                 <div class="empty-state-icon">✦</div>
                 <div class="empty-state-title">{{ channelName }}</div>
@@ -702,6 +735,16 @@ const activeInputPlugins = computed(() =>
         .map(({ slug, plugin }) => ({ slug, component: plugin.component }))
 )
 
+const activeTopMenuTab = ref(null)
+const activeTopMenuPlugins = computed(() =>
+    props.enabledPlugins
+        .map(slug => ({ slug, plugin: getPlugin(slug) }))
+        .filter(({ plugin }) => plugin?.zones?.includes('topmenu'))
+        .map(({ slug, plugin }) => ({ slug, component: plugin.component, label: plugin.tabLabel ?? slug }))
+)
+// Reset tab when switching channels
+watch(() => props.channel?.id, () => { activeTopMenuTab.value = null })
+
 // Single handler for all input-zone plugin @insert events.
 function insertFromPlugin(value) {
     if (typeof value === 'string' && /\/storage\/uploads\/models\//.test(value)) {
@@ -773,6 +816,40 @@ watch(() => props.messages.length, async () => {
 </script>
 
 <style scoped>
+/* ── Plugin top-menu zone ───────────────────────────────────────────────── */
+.plugin-topmenu {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    background: rgba(0,0,0,0.12);
+    flex-shrink: 0;
+}
+.plugin-topmenu-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: rgba(255,255,255,0.45);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+    margin-bottom: -1px;
+}
+.plugin-topmenu-tab:hover { color: rgba(255,255,255,0.75); }
+.plugin-topmenu-tab.active {
+    color: var(--accent, #a78bfa);
+    border-bottom-color: var(--accent, #a78bfa);
+}
+.plugin-topmenu-panel {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
 .msg-gif {
     display: block;
     max-width: 300px;

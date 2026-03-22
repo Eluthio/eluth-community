@@ -192,6 +192,9 @@ Route::middleware('auth.central')->group(function () {
     Route::post('/plugins/polls/{id}/vote',      [PollController::class, 'vote']);
     Route::post('/plugins/polls/{id}/close',     [PollController::class, 'close']);
 
+    // File manager plugin
+    Route::get('/plugins/file-manager/files', [PluginController::class, 'fileManagerFiles']);
+
     // Watch party plugin
     Route::get('/plugins/watch-party/proposals',                  [WatchPartyController::class, 'index']);
     Route::post('/plugins/watch-party/proposals',                 [WatchPartyController::class, 'propose'])
