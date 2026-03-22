@@ -279,6 +279,7 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { gsap } from 'gsap'
 import { createEcho } from './echo.js'
 import { loadClientConfig, getConfig } from './clientConfig.js'
+import { loadPlugin } from './plugins/registry.js'
 import { useApi, ApiError } from './composables/useApi.js'
 import VideoBackground from './components/VideoBackground.vue'
 import ChannelSidebar  from './components/ChannelSidebar.vue'
@@ -874,6 +875,17 @@ async function loadMessages(channelId) {
 async function loadPlugins() {
     try {
         const data = await get('/plugins')
+        const storageUrl = getConfig().storageUrl ?? (window.location.origin + '/storage')
+
+        // Dynamically load each enabled plugin's compiled IIFE from storage
+        await Promise.allSettled(
+            (data.plugins ?? [])
+                .filter(p => p.is_enabled)
+                .map(p => loadPlugin(p.slug, storageUrl)
+                    .catch(e => console.warn(`[plugins] Failed to load "${p.slug}":`, e))
+                )
+        )
+
         enabledPlugins.value = (data.plugins ?? [])
             .filter(p => p.is_enabled)
             .map(p => p.slug)

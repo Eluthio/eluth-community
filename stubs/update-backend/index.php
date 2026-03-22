@@ -129,36 +129,6 @@ if (($_POST['act'] ?? '') === 'install_plugin') {
     exit;
 }
 
-if (($_POST['act'] ?? '') === 'install_official_plugin') {
-    $slug    = preg_replace('/[^a-z0-9_-]/', '', $_POST['slug'] ?? '');
-    $official = officialPlugins();
-    if (!$slug || !isset($official[$slug])) {
-        header('Location: ?step=plugins&err=' . urlencode('Unknown official plugin.'));
-        exit;
-    }
-    $info     = $official[$slug];
-    $manifest = json_encode([
-        'description' => $info['description'],
-        'settings'    => $info['settings'],
-        'zones'       => ['input'],
-        'version'     => '1.0.0',
-    ]);
-    try {
-        $db = getDB();
-        foreach ($info['setup_sql'] ?? [] as $sql) {
-            $db->exec($sql);
-        }
-        $db->prepare(
-            "INSERT IGNORE INTO plugins (slug, name, tier, manifest, is_enabled, created_at, updated_at)
-             VALUES (?, ?, 'official', ?, 0, NOW(), NOW())"
-        )->execute([$slug, $info['name'], $manifest]);
-    } catch (\Throwable $e) {
-        header('Location: ?step=plugins&err=' . urlencode('Database error: ' . $e->getMessage()));
-        exit;
-    }
-    header('Location: ?step=plugins&msg=' . urlencode($info['name'] . ' installed. Enable it below.'));
-    exit;
-}
 
 if (($_POST['act'] ?? '') === 'uninstall_plugin') {
     $slug = preg_replace('/[^a-z0-9_-]/', '', $_POST['slug'] ?? '');
@@ -1311,13 +1281,7 @@ function pagePlugins(): void
                         <?php if ($p['homepage'] ?? null): ?>
                             <a href="<?= htmlspecialchars($p['homepage']) ?>" target="_blank" rel="noopener" class="btn btn--ghost btn--sm">Docs</a>
                         <?php endif; ?>
-                        <?php if ($p['tier'] === 'official'): ?>
-                            <form method="POST" style="margin:0">
-                                <input type="hidden" name="act" value="install_official_plugin">
-                                <input type="hidden" name="slug" value="<?= htmlspecialchars($p['slug']) ?>">
-                                <button class="btn btn--primary btn--sm">Install</button>
-                            </form>
-                        <?php elseif ($p['github_zip_url'] ?? null): ?>
+                        <?php if ($p['github_zip_url'] ?? null): ?>
                             <form method="POST" style="margin:0">
                                 <input type="hidden" name="act" value="install_plugin">
                                 <input type="hidden" name="url" value="<?= htmlspecialchars($p['github_zip_url']) ?>">

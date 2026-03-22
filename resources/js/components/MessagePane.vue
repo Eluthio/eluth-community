@@ -222,7 +222,7 @@
 import { ref, computed, watch, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { gsap } from 'gsap'
 import StreamPlayer from './StreamPlayer.vue'
-import { OFFICIAL_PLUGINS } from '../plugins/registry.js'
+import { getPlugin } from '../plugins/registry.js'
 
 const props = defineProps({
     channelName:   { type: String, default: 'general' },
@@ -696,8 +696,9 @@ const pendingGif = ref(null)
 
 const activeInputPlugins = computed(() =>
     props.enabledPlugins
-        .filter(slug => OFFICIAL_PLUGINS[slug]?.zones.includes('input'))
-        .map(slug => ({ slug, ...OFFICIAL_PLUGINS[slug] }))
+        .map(slug => ({ slug, plugin: getPlugin(slug) }))
+        .filter(({ plugin }) => plugin?.zones?.includes('input'))
+        .map(({ slug, plugin }) => ({ slug, component: plugin.component }))
 )
 
 // Single handler for all input-zone plugin @insert events.

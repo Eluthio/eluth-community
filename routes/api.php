@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Route;
 Route::get('/client-config', function () {
     return response()->json([
         'centralUrl'    => env('CENTRAL_SERVER_URL', ''),
+        'storageUrl'    => rtrim(env('APP_URL', ''), '/') . '/storage',
         'reverbKey'     => env('REVERB_APP_KEY', ''),
         'reverbHost'    => env('VITE_REVERB_HOST', env('REVERB_HOST', '')),
         'reverbPort'    => (int) env('VITE_REVERB_PORT', env('REVERB_PORT', 443)),
