@@ -1,5 +1,8 @@
 import GifPicker      from './GifPicker.vue'
 import EmoticonPicker from './EmoticonPicker.vue'
+import ImageUploader  from './ImageUploader.vue'
+import ModelViewer    from './ModelViewer.vue'
+import WatchParty     from './WatchParty.vue'
 
 /**
  * Official plugin registry.
@@ -14,6 +17,18 @@ export const OFFICIAL_PLUGINS = {
     },
     'emoticon-picker': {
         component: EmoticonPicker,
+        zones: ['input'],
+    },
+    'image-uploader': {
+        component: ImageUploader,
+        zones: ['input'],
+    },
+    'model-viewer': {
+        component: ModelViewer,
+        zones: ['input'],
+    },
+    'watch-party': {
+        component: WatchParty,
         zones: ['input'],
     },
 }

@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\MemberController;
 use App\Http\Controllers\Api\PluginController;
 use App\Http\Controllers\Api\StreamController;
+use App\Http\Controllers\Api\WatchPartyController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -174,6 +175,22 @@ Route::middleware('auth.central')->group(function () {
     Route::get('/plugins/emoticons/emotes', [EmoteController::class, 'index']);
     Route::post('/admin/plugins/emoticons/emotes', [EmoteController::class, 'store']);
     Route::delete('/admin/plugins/emoticons/emotes/{name}', [EmoteController::class, 'destroy']);
+
+    // Image uploader plugin
+    Route::post('/plugins/image-uploader/upload', [PluginController::class, 'imageUpload'])
+        ->middleware('throttle:20,1');
+
+    // 3D model viewer plugin
+    Route::post('/plugins/model-viewer/upload', [PluginController::class, 'modelUpload'])
+        ->middleware('throttle:10,1');
+
+    // Watch party plugin
+    Route::get('/plugins/watch-party/proposals',          [WatchPartyController::class, 'index']);
+    Route::post('/plugins/watch-party/proposals',         [WatchPartyController::class, 'propose'])
+        ->middleware('throttle:10,1');
+    Route::post('/plugins/watch-party/proposals/{id}/vote', [WatchPartyController::class, 'vote']);
+    Route::delete('/plugins/watch-party/proposals/{id}',  [WatchPartyController::class, 'destroy']);
+    Route::delete('/plugins/watch-party/proposals',       [WatchPartyController::class, 'clear']);
 
     // Debug log — admin only, only when APP_DEBUG is true
     Route::get('/admin/debug-log', function (Request $request) {

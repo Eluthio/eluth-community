@@ -238,6 +238,55 @@ class PluginController extends Controller
         return $this->giphyRequest('trending', '');
     }
 
+    // ── Image Uploader ────────────────────────────────────────────────────────
+
+    /**
+     * POST /api/plugins/image-uploader/upload
+     * Accepts an image file, stores it, returns public URL.
+     */
+    public function imageUpload(Request $request): JsonResponse
+    {
+        $request->validate([
+            'image' => ['required', 'file', 'mimes:jpg,jpeg,png,gif,webp', 'max:8192'],
+        ]);
+
+        $file = $request->file('image');
+        $name = \Str::uuid() . '.' . $file->getClientOriginalExtension();
+        $file->storeAs('uploads/images', $name, 'public');
+
+        $url = \Storage::disk('public')->url('uploads/images/' . $name);
+
+        return response()->json(['url' => $url]);
+    }
+
+    // ── 3D Model Viewer ───────────────────────────────────────────────────────
+
+    /**
+     * POST /api/plugins/model-viewer/upload
+     * Accepts an OBJ, STL, or GLB file, stores it, returns public URL.
+     */
+    public function modelUpload(Request $request): JsonResponse
+    {
+        $request->validate([
+            'model' => ['required', 'file', 'mimes:obj,stl,glb,gltf', 'max:51200'],
+        ]);
+
+        $file = $request->file('model');
+        $ext  = strtolower($file->getClientOriginalExtension());
+
+        // Extra safety: only allow known 3D extensions
+        if (! in_array($ext, ['obj', 'stl', 'glb', 'gltf'])) {
+            return response()->json(['message' => 'Unsupported file type.'], 422);
+        }
+
+        $name = \Str::uuid() . '.' . $ext;
+        $file->storeAs('uploads/models', $name, 'public');
+
+        $url = \Storage::disk('public')->url('uploads/models/' . $name);
+
+        return response()->json(['url' => $url]);
+    }
+
     private function giphyRequest(string $type, string $query): JsonResponse
     {
         $key = \DB::table('server_settings')->where('key', 'plugin_gif-picker_giphy_key')->value('value');

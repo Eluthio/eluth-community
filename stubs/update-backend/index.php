@@ -960,6 +960,21 @@ function officialPlugins(): array
             'description' => 'Standard emoji and custom animated server emotes.',
             'settings'    => [],
         ],
+        'image-uploader' => [
+            'name'        => 'Image Uploader',
+            'description' => 'Drag-and-drop or click to upload images directly into chat.',
+            'settings'    => [],
+        ],
+        'model-viewer' => [
+            'name'        => '3D Model Viewer',
+            'description' => 'Upload OBJ, STL, or GLB files and view them in an interactive 3D viewer.',
+            'settings'    => [],
+        ],
+        'watch-party' => [
+            'name'        => 'Watch Party',
+            'description' => 'Propose links, vote on what to watch next, and enjoy together.',
+            'settings'    => [],
+        ],
     ];
 }
 

@@ -138,6 +138,8 @@
                     :settings="pluginSettings[plugin.slug] ?? {}"
                     :api-base="props.apiBase"
                     :auth-token="props.authToken"
+                    :channel-id="props.channel?.id ?? ''"
+                    :current-member="props.currentMember"
                     @insert="insertFromPlugin"
                 />
             </div>
@@ -424,6 +426,23 @@ function renderContent(content) {
     // Embed GIF/image URLs from known CDNs
     const gifPattern = /https?:\/\/(media\d*\.tenor\.com|c\.tenor\.com|media\d*\.giphy\.com|i\.giphy\.com)\/\S+\.(gif|webp|mp4)(\?\S*)?/gi
     safe = safe.replace(gifPattern, url => `<img src="${url}" class="msg-gif" alt="GIF" loading="lazy" />`)
+
+    // Embed uploaded images from this server's storage
+    const uploadedImgPattern = /https?:\/\/\S+\/storage\/uploads\/images\/\S+\.(jpe?g|png|gif|webp)/gi
+    safe = safe.replace(uploadedImgPattern, url => `<img src="${url}" class="msg-gif msg-uploaded-img" alt="Image" loading="lazy" />`)
+
+    // 3D model links — render as an open button
+    const modelPattern = /https?:\/\/(\S+)\/storage\/uploads\/models\/(\S+\.(obj|stl|glb|gltf))/gi
+    safe = safe.replace(modelPattern, url => {
+        try {
+            const { origin } = new URL(url)
+            const viewerUrl = `${origin}/3d-viewer?model=${encodeURIComponent(url)}`
+            const filename  = url.split('/').pop()
+            return `<a href="${viewerUrl}" target="_blank" rel="noopener" class="msg-model-link">📦 View 3D Model · ${filename}</a>`
+        } catch {
+            return url
+        }
+    })
 
     // Replace :emote_name: with custom emote images
     safe = safe.replace(/:([a-z0-9_-]{2,32}):/g, (match, name) => {
@@ -752,6 +771,28 @@ watch(() => props.messages.length, async () => {
     border-radius: 6px;
     margin-top: 4px;
 }
+.msg-uploaded-img {
+    max-width: 400px;
+    max-height: 300px;
+    cursor: pointer;
+}
+.msg-uploaded-img:hover { opacity: .9; }
+:deep(.msg-model-link) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    padding: 7px 12px;
+    background: rgba(167,139,250,.1);
+    border: 1px solid rgba(167,139,250,.25);
+    border-radius: 8px;
+    color: #a78bfa;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all .15s;
+}
+:deep(.msg-model-link):hover { background: rgba(167,139,250,.18); border-color: rgba(167,139,250,.4); }
 
 .msg-emote {
     display: inline-block;
