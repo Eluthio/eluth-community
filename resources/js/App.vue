@@ -874,14 +874,19 @@ async function loadPlugins() {
     try {
         const data = await get('/plugins')
         const storageUrl = getConfig().storageUrl ?? (window.location.origin + '/storage')
+        const originUrl  = window.location.origin
 
-        // Dynamically load each enabled plugin's compiled IIFE from storage
+        // Official plugins are bundled with the community server (served from /plugins/)
+        // Third-party plugins are installed to storage
         await Promise.allSettled(
             (data.plugins ?? [])
                 .filter(p => p.is_enabled)
-                .map(p => loadPlugin(p.slug, storageUrl)
-                    .catch(e => console.warn(`[plugins] Failed to load "${p.slug}":`, e))
-                )
+                .map(p => {
+                    const baseUrl = p.tier === 'official' ? originUrl : storageUrl
+                    const entry   = p.manifest?.entry ?? 'index.js'
+                    return loadPlugin(p.slug, baseUrl, entry)
+                        .catch(e => console.warn(`[plugins] Failed to load "${p.slug}":`, e))
+                })
         )
 
         enabledPlugins.value = (data.plugins ?? [])

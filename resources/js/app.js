@@ -2,6 +2,7 @@ import * as Vue from 'vue'
 import { createApp } from 'vue'
 import App from './App.vue'
 import '../css/app.css'
+import '../css/plugins.css'
 
 // Expose Vue globally so plugin IIFE bundles can use it without bundling their own copy.
 window.Vue = Vue

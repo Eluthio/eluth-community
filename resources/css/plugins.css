@@ -1,0 +1,257 @@
+/* ── Shared plugin primitives ───────────────────────────────────────────────── */
+.plugin-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.plugin-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 99;
+}
+
+.plugin-panel {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    right: 0;
+    z-index: 100;
+    background: #1e2433;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    padding: 12px;
+    min-width: 280px;
+    max-width: 340px;
+}
+
+.plugin-loading,
+.plugin-empty {
+    color: rgba(255,255,255,0.4);
+    font-size: 13px;
+    text-align: center;
+    padding: 16px 0;
+}
+
+.plugin-error {
+    color: #f87171;
+    font-size: 12px;
+    margin-top: 4px;
+}
+
+.plugin-field {
+    width: 100%;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 6px;
+    color: #e2e8f0;
+    font-size: 13px;
+    padding: 6px 10px;
+    margin-top: 6px;
+    box-sizing: border-box;
+    outline: none;
+}
+.plugin-field:focus { border-color: rgba(99,102,241,0.6); }
+
+.plugin-btn-primary {
+    background: #6366f1;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    padding: 6px 14px;
+    cursor: pointer;
+    margin-top: 8px;
+}
+.plugin-btn-primary:hover { background: #4f46e5; }
+
+.plugin-btn-ghost {
+    background: transparent;
+    color: rgba(255,255,255,0.5);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 6px;
+    font-size: 12px;
+    padding: 5px 10px;
+    cursor: pointer;
+    margin-top: 8px;
+}
+.plugin-btn-ghost:hover { color: #e2e8f0; border-color: rgba(255,255,255,0.25); }
+
+.plugin-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+/* ── GIF picker ─────────────────────────────────────────────────────────────── */
+.plugin-gif-btn { font-size: 12px; font-weight: 700; letter-spacing: 0.5px; }
+
+.plugin-gif-search-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.plugin-gif-search {
+    flex: 1;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 6px;
+    color: #e2e8f0;
+    font-size: 13px;
+    padding: 6px 10px;
+    outline: none;
+}
+.plugin-gif-search:focus { border-color: rgba(99,102,241,0.6); }
+
+.plugin-gif-go {
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 6px;
+    color: #e2e8f0;
+    cursor: pointer;
+    padding: 6px 8px;
+    font-size: 14px;
+}
+
+.plugin-gif-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.plugin-gif-thumb {
+    width: 100%;
+    aspect-ratio: 16/9;
+    object-fit: cover;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+.plugin-gif-thumb:hover { opacity: 0.8; }
+
+/* ── Watch Party ────────────────────────────────────────────────────────────── */
+.plugin-wp-panel { min-width: 300px; }
+
+.plugin-wp-list {
+    max-height: 200px;
+    overflow-y: auto;
+    margin-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.plugin-wp-item {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+.plugin-wp-item--ok { border-color: rgba(34,197,94,0.3); }
+
+.plugin-wp-title {
+    font-size: 13px;
+    color: #e2e8f0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.plugin-wp-meta {
+    font-size: 11px;
+    color: rgba(255,255,255,0.4);
+    margin-top: 2px;
+}
+
+.plugin-wp-vote {
+    margin-top: 6px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 4px;
+    color: rgba(255,255,255,0.5);
+    font-size: 11px;
+    padding: 3px 8px;
+    cursor: pointer;
+}
+.plugin-wp-vote--on { background: rgba(99,102,241,0.2); border-color: rgba(99,102,241,0.4); color: #a5b4fc; }
+
+.plugin-wp-form { border-top: 1px solid rgba(255,255,255,0.07); padding-top: 10px; }
+
+/* ── Emote picker ───────────────────────────────────────────────────────────── */
+.plugin-emote-panel { min-width: 260px; }
+
+.plugin-emote-search {
+    width: 100%;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 6px;
+    color: #e2e8f0;
+    font-size: 13px;
+    padding: 6px 10px;
+    margin-bottom: 8px;
+    box-sizing: border-box;
+    outline: none;
+}
+
+.plugin-emote-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.plugin-emote-thumb {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: contain;
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 2px;
+    box-sizing: border-box;
+}
+.plugin-emote-thumb:hover { background: rgba(255,255,255,0.08); }
+
+/* ── Polls ──────────────────────────────────────────────────────────────────── */
+.plugin-poll-panel { min-width: 280px; }
+
+.plugin-poll-q {
+    font-size: 14px;
+    font-weight: 600;
+    color: #e2e8f0;
+    margin-bottom: 10px;
+}
+
+.plugin-poll-opt {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    color: #e2e8f0;
+    font-size: 13px;
+    padding: 8px 12px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    text-align: left;
+    box-sizing: border-box;
+}
+.plugin-poll-opt:hover { background: rgba(255,255,255,0.09); }
+.plugin-poll-opt--on { border-color: rgba(99,102,241,0.5); background: rgba(99,102,241,0.15); }
+
+.plugin-poll-pct { color: rgba(255,255,255,0.45); font-size: 12px; }
+
+.plugin-poll-meta {
+    font-size: 11px;
+    color: rgba(255,255,255,0.35);
+    margin-top: 4px;
+    margin-bottom: 8px;
+}
+
+.plugin-poll-close { font-size: 11px; padding: 3px 8px; margin-top: 4px; }
+
+.plugin-poll-form { display: flex; flex-direction: column; }
