@@ -1130,15 +1130,11 @@ function pagePlugins(): void
                         <button class="btn btn--primary btn--sm">Enable</button>
                     </form>
                 <?php endif; ?>
-                <form method="POST" style="margin:0" onsubmit="return confirm('Uninstall <?= htmlspecialchars(addslashes($plugin->name)) ?>? Files and settings will be deleted.')">
+                <?php $hasTeardown = file_exists(BASE . '/storage/app/public/plugins/' . $plugin->slug . '/teardown.sql'); ?>
+                <form method="POST" style="margin:0" onsubmit="return confirmUninstall(this, <?= $hasTeardown ? 'true' : 'false' ?>, '<?= htmlspecialchars(addslashes($plugin->name)) ?>')">
                     <input type="hidden" name="act" value="uninstall_plugin">
                     <input type="hidden" name="slug" value="<?= htmlspecialchars($plugin->slug) ?>">
-                    <?php $hasTeardown = file_exists(BASE . '/storage/app/public/plugins/' . $plugin->slug . '/teardown.sql'); ?>
-                    <?php if ($hasTeardown): ?>
-                    <label style="font-size:12px;color:#94a3b8;display:flex;align-items:center;gap:5px;margin-bottom:4px;cursor:pointer;">
-                        <input type="checkbox" name="run_teardown" value="1" checked> Remove database tables
-                    </label>
-                    <?php endif; ?>
+                    <input type="hidden" name="run_teardown" value="0">
                     <button class="btn btn--danger btn--sm">Uninstall</button>
                 </form>
             </div>
@@ -1447,6 +1443,15 @@ code{background:rgba(255,255,255,.06);border-radius:3px;padding:1px 5px;font-siz
 
 function html_foot(): void { ?>
 <script>
+function confirmUninstall(form, hasTeardown, name) {
+    if (!confirm('Uninstall ' + name + '? Plugin files and settings will be deleted.')) return false;
+    if (hasTeardown) {
+        const removeTables = confirm('Also remove this plugin\'s database tables?\n\nClick OK to remove tables, or Cancel to keep them.');
+        form.querySelector('[name="run_teardown"]').value = removeTables ? '1' : '0';
+    }
+    return true;
+}
+
 function filterStore() {
     const q          = (document.getElementById('store-search')?.value || '').toLowerCase();
     const activeBtn  = document.querySelector('.tag-filter.active');
