@@ -932,74 +932,6 @@ function getDB(): PDO
     return $pdo;
 }
 
-function officialPlugins(): array
-{
-    return [
-        'gif-picker' => [
-            'name'        => 'GIF Picker',
-            'description' => 'Search and insert GIFs from Giphy directly into chat.',
-            'settings'    => [
-                ['key' => 'giphy_key', 'label' => 'Giphy API Key', 'placeholder' => 'Free key at developers.giphy.com'],
-            ],
-        ],
-        'emoticon-picker' => [
-            'name'        => 'Emoticon Picker',
-            'description' => 'Standard emoji and custom animated server emotes.',
-            'settings'    => [],
-        ],
-        'image-uploader' => [
-            'name'        => 'Image Uploader',
-            'description' => 'Drag-and-drop or click to upload images directly into chat.',
-            'settings'    => [],
-        ],
-        'model-viewer' => [
-            'name'        => '3D Model Viewer',
-            'description' => 'Upload OBJ, STL, or GLB files and view them in an interactive 3D viewer.',
-            'settings'    => [],
-        ],
-        'watch-party' => [
-            'name'        => 'Watch Party',
-            'description' => 'Propose links, vote on what to watch next, and enjoy together.',
-            'settings'    => [],
-            'setup_sql'   => [
-                "CREATE TABLE IF NOT EXISTS watch_proposals (
-                    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                    channel_id VARCHAR(255) NOT NULL,
-                    url TEXT NOT NULL,
-                    title VARCHAR(255) NULL,
-                    proposed_by VARCHAR(255) NOT NULL,
-                    proposed_by_id VARCHAR(255) NOT NULL,
-                    created_at TIMESTAMP NULL,
-                    updated_at TIMESTAMP NULL,
-                    INDEX idx_channel (channel_id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-                "CREATE TABLE IF NOT EXISTS watch_votes (
-                    proposal_id BIGINT UNSIGNED NOT NULL,
-                    voter_id VARCHAR(255) NOT NULL,
-                    PRIMARY KEY (proposal_id, voter_id),
-                    FOREIGN KEY (proposal_id) REFERENCES watch_proposals(id) ON DELETE CASCADE
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-            ],
-        ],
-    ];
-}
-
-function seedOfficialPlugins(): void
-{
-    $db = getDB();
-    foreach (officialPlugins() as $slug => $info) {
-        $manifest = json_encode([
-            'description' => $info['description'],
-            'settings'    => $info['settings'],
-            'zones'       => ['input'],
-            'version'     => '1.0.0',
-        ]);
-        $db->prepare(
-            "INSERT IGNORE INTO plugins (slug, name, tier, manifest, is_enabled, created_at, updated_at)
-             VALUES (?, ?, 'official', ?, 0, NOW(), NOW())"
-        )->execute([$slug, $info['name'], $manifest]);
-    }
-}
 
 function installPluginFromUrl(string $url): ?string
 {
@@ -1043,11 +975,6 @@ function installPluginFromUrl(string $url): ?string
     $slug = preg_replace('/[^a-z0-9_-]/', '', strtolower($manifest['slug']));
     if (!$slug) { rmdirRecursive($extract); return 'Invalid plugin slug.'; }
 
-    // Block overriding official plugins
-    if (array_key_exists($slug, officialPlugins())) {
-        rmdirRecursive($extract);
-        return 'Cannot install over an official built-in plugin.';
-    }
 
     // Copy files to public plugin storage
     $dest = BASE . '/storage/app/public/plugins/' . $slug;
