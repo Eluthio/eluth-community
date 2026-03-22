@@ -134,10 +134,24 @@ if (($_POST['act'] ?? '') === 'uninstall_plugin') {
     $slug = preg_replace('/[^a-z0-9_-]/', '', $_POST['slug'] ?? '');
     if ($slug) {
         try {
-            $db = getDB();
+            $db  = getDB();
+            $dir = BASE . '/storage/app/public/plugins/' . $slug;
+
+            // Optionally run teardown.sql before deleting files
+            if (!empty($_POST['run_teardown'])) {
+                $teardownPath = $dir . '/teardown.sql';
+                if (file_exists($teardownPath)) {
+                    $sql = file_get_contents($teardownPath);
+                    foreach (array_filter(array_map('trim', explode(';', $sql))) as $stmt) {
+                        if (preg_match('/^\s*DROP\s+(TABLE|INDEX)\s+IF\s+EXISTS\s/i', $stmt)) {
+                            try { $db->exec($stmt); } catch (\Throwable $e) {}
+                        }
+                    }
+                }
+            }
+
             $db->prepare("DELETE FROM plugins WHERE slug=?")->execute([$slug]);
             $db->prepare("DELETE FROM server_settings WHERE `key` LIKE ?")->execute(['plugin_' . $slug . '_%']);
-            $dir = BASE . '/storage/app/public/plugins/' . $slug;
             if (is_dir($dir)) rmdirRecursive($dir);
         } catch (\Throwable $e) {}
     }
@@ -1189,9 +1203,15 @@ function pagePlugins(): void
                         <button class="btn btn--primary btn--sm">Enable</button>
                     </form>
                 <?php endif; ?>
-                <form method="POST" style="margin:0" onsubmit="return confirm('Uninstall <?= htmlspecialchars(addslashes($plugin->name)) ?>? This cannot be undone.')">
+                <form method="POST" style="margin:0" onsubmit="return confirm('Uninstall <?= htmlspecialchars(addslashes($plugin->name)) ?>? Files and settings will be deleted.')">
                     <input type="hidden" name="act" value="uninstall_plugin">
                     <input type="hidden" name="slug" value="<?= htmlspecialchars($plugin->slug) ?>">
+                    <?php $hasTeardown = file_exists(BASE . '/storage/app/public/plugins/' . $plugin->slug . '/teardown.sql'); ?>
+                    <?php if ($hasTeardown): ?>
+                    <label style="font-size:12px;color:#94a3b8;display:flex;align-items:center;gap:5px;margin-bottom:4px;cursor:pointer;">
+                        <input type="checkbox" name="run_teardown" value="1" checked> Remove database tables
+                    </label>
+                    <?php endif; ?>
                     <button class="btn btn--danger btn--sm">Uninstall</button>
                 </form>
             </div>
