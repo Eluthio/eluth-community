@@ -135,9 +135,9 @@ class PluginController extends Controller
         $slug = preg_replace('/[^a-z0-9\-]/', '', strtolower($manifest['slug']));
         $tier = $manifest['tier'];
 
-        if (! in_array($tier, ['approved', 'unofficial'])) {
+        if (! in_array($tier, ['official', 'approved', 'unofficial'])) {
             $zip->close(); @unlink($tmpZip);
-            return response()->json(['message' => 'Only approved or unofficial plugins can be installed.'], 422);
+            return response()->json(['message' => 'Invalid plugin tier.'], 422);
         }
 
         // Verify approved plugins with central
