@@ -430,21 +430,28 @@ async function startStream(source = 'display') {
     }
 }
 
+const forceStopped  = ref(false)
+const forceStopBusy = ref(false)
+
+// Reset local override when a new stream starts (so the bar can reappear if needed)
+watch(() => props.channel?.is_live, (val) => { if (val) forceStopped.value = false })
+
 const canForceStop = computed(() =>
+    !forceStopped.value &&
     props.channel?.is_live &&
     !isStreaming.value &&
     (props.currentMember?.isAdmin || props.currentMember?.can('manage_channels'))
 )
-const forceStopBusy = ref(false)
 
 async function forceStopStream() {
     if (!confirm('Force-stop the current stream? Only do this if the streamer has disconnected and the channel is stuck.')) return
     forceStopBusy.value = true
     try {
-        await fetch(`${props.apiBase}/api/streams/${props.channel.id}/stop`, {
+        const res = await fetch(`${props.apiBase}/api/streams/${props.channel.id}/stop`, {
             method: 'POST',
             headers: { Authorization: 'Bearer ' + props.authToken },
         })
+        if (res.ok) forceStopped.value = true
     } catch { /* ignore */ }
     forceStopBusy.value = false
 }
