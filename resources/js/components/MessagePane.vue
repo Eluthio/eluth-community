@@ -370,7 +370,7 @@ async function startStream(source = 'display') {
         const mimeType = candidates.find(m => MediaRecorder.isTypeSupported(m)) ?? 'video/webm'
 
         // Notify server we're starting
-        const res = await fetch(`${props.apiBase}/api/streams/${props.channel.id}/start`, {
+        const res = await fetch(`${props.apiBase}/streams/${props.channel.id}/start`, {
             method: 'POST',
             headers: {
                 Authorization: 'Bearer ' + props.authToken,
@@ -401,7 +401,7 @@ async function startStream(source = 'display') {
             form.append('seq', seq)
             form.append('chunk', e.data, 'chunk.webm')
             try {
-                await fetch(`${props.apiBase}/api/streams/${props.channel.id}/chunk`, {
+                await fetch(`${props.apiBase}/streams/${props.channel.id}/chunk`, {
                     method: 'POST',
                     headers: { Authorization: 'Bearer ' + props.authToken },
                     body: form,
@@ -447,7 +447,7 @@ async function forceStopStream() {
     if (!confirm('Force-stop the current stream? Only do this if the streamer has disconnected and the channel is stuck.')) return
     forceStopBusy.value = true
     try {
-        const res = await fetch(`${props.apiBase}/api/streams/${props.channel.id}/stop`, {
+        const res = await fetch(`${props.apiBase}/streams/${props.channel.id}/stop`, {
             method: 'POST',
             headers: { Authorization: 'Bearer ' + props.authToken },
         })
@@ -467,7 +467,7 @@ async function stopStream() {
     mediaRecorder = null
 
     try {
-        await fetch(`${props.apiBase}/api/streams/${props.channel.id}/stop`, {
+        await fetch(`${props.apiBase}/streams/${props.channel.id}/stop`, {
             method: 'POST',
             headers: { Authorization: 'Bearer ' + props.authToken },
         })
