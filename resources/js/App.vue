@@ -130,6 +130,7 @@
                         :members="members"
                         :current-member="currentMemberProxy"
                         :channel="activeChannel"
+                        :current-username="currentUser.username"
                         :can-stream="currentMemberProxy?.can('stream') ?? false"
                         api-base="/api"
                         :auth-token="authToken"

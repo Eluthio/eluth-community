@@ -160,7 +160,7 @@ class StreamController extends Controller
             'live_started_at'       => null,
         ]);
 
-        broadcast(new ChannelLiveEnded($channelId))->toOthers();
+        broadcast(new ChannelLiveEnded($channelId));
 
         return response()->json(['message' => 'Stream stopped.']);
     }

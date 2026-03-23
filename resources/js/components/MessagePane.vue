@@ -297,8 +297,9 @@ const props = defineProps({
     messages:      { type: Array,  default: () => [] },
     members:       { type: Array,  default: () => [] },
     currentMember: { type: Object, default: null },
-    channel:       { type: Object, default: null },   // full channel object (type, is_live, etc.)
-    canStream:     { type: Boolean, default: false },
+    channel:         { type: Object, default: null },   // full channel object (type, is_live, etc.)
+    currentUsername: { type: String, default: '' },
+    canStream:       { type: Boolean, default: false },
     apiBase:       { type: String, default: '' },
     authToken:     { type: String, default: '' },
     enabledPlugins: { type: Array,  default: () => [] },
@@ -440,6 +441,8 @@ const canForceStop = computed(() =>
     !forceStopped.value &&
     props.channel?.is_live &&
     !isStreaming.value &&
+    // Don't show to the active streamer — they should use the plugin's stop button
+    props.channel?.live_streamer_username !== props.currentUsername &&
     (props.currentMember?.isAdmin || props.currentMember?.can('manage_channels'))
 )
 
