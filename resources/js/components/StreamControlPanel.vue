@@ -94,6 +94,59 @@
             <!-- Divider -->
             <div class="sc-divider" />
 
+            <!-- Audio mixer -->
+            <div class="sc-audio">
+                <div class="sc-panel-title" style="padding:10px 12px 6px">Audio Mix</div>
+                <div v-if="Object.keys(audioChannels).length" class="sc-audio-channels">
+                    <div v-for="(ch, key) in audioChannels" :key="key" class="sc-audio-strip">
+                        <!-- VU meter -->
+                        <div class="sc-vu-wrap">
+                            <div class="sc-vu-track">
+                                <div class="sc-vu-fill"
+                                    :class="vuClass(audioLevels[key] ?? 0)"
+                                    :style="{ height: (audioLevels[key] ?? 0) * 100 + '%' }" />
+                            </div>
+                        </div>
+                        <!-- Rotary knob -->
+                        <svg class="sc-knob" viewBox="0 0 40 40"
+                            :class="{ muted: ch.muted }"
+                            :title="`${ch.label}: ${Math.round(ch.gain * 100)}%`"
+                            @mousedown.prevent="startKnobDrag(key, ch.gain, $event)"
+                            @dblclick="sendCommand({ type: 'set-audio-gain', sourceKey: key, gain: 1 })">
+                            <!-- Background track arc -->
+                            <path class="sc-knob-track" d="M 8.7 31.3 A 16 16 0 1 1 31.3 31.3" />
+                            <!-- Value arc -->
+                            <path v-if="ch.gain > 0" class="sc-knob-value"
+                                :class="{ muted: ch.muted }"
+                                :d="knobArc(ch.gain)" />
+                            <!-- Indicator line -->
+                            <line x1="20" y1="20"
+                                :x2="knobTip(ch.gain).x" :y2="knobTip(ch.gain).y"
+                                class="sc-knob-line" :class="{ muted: ch.muted }" />
+                        </svg>
+                        <!-- Level % -->
+                        <div class="sc-audio-pct" :class="{ muted: ch.muted }">
+                            {{ ch.muted ? 'MUTE' : Math.round(ch.gain * 100) + '%' }}
+                        </div>
+                        <!-- Mute button -->
+                        <button class="sc-audio-mute-btn" :class="{ muted: ch.muted }"
+                            @click="sendCommand({ type: 'set-audio-mute', sourceKey: key, muted: !ch.muted })">
+                            {{ ch.muted ? '🔇' : '🔊' }}
+                        </button>
+                        <!-- Channel label -->
+                        <div class="sc-audio-lbl" :class="{ muted: ch.muted }">
+                            {{ ch.icon }}&thinsp;{{ ch.label }}
+                        </div>
+                    </div>
+                </div>
+                <div v-else class="sc-empty" style="padding:20px 8px">
+                    No audio.<br>Go live to see<br>channels.
+                </div>
+            </div>
+
+            <!-- Divider -->
+            <div class="sc-divider" />
+
             <!-- Layer editor -->
             <div class="sc-layers">
                 <div class="sc-panel-header">
@@ -463,6 +516,61 @@ function pct(v) { return Math.round(v * 100) + '%' }
 function sourceIcon(key) { return sourceRegistry.value[key]?.icon ?? '📹' }
 function sourceName(key) { return sourceRegistry.value[key]?.label ?? key }
 
+// ── Audio mixer ───────────────────────────────────────────────────────────────
+const audioChannels = ref({})   // { sourceKey: { gain, muted, label, icon } }
+const audioLevels   = ref({})   // { sourceKey: 0.0-1.0 } — from fast BC messages
+
+// ── Knob helpers ──────────────────────────────────────────────────────────────
+function knobAngle(gain) { return -135 + gain * 270 }
+
+function knobTip(gain) {
+    const rad = knobAngle(gain) * Math.PI / 180
+    return { x: +(20 + 11 * Math.sin(rad)).toFixed(2), y: +(20 - 11 * Math.cos(rad)).toFixed(2) }
+}
+
+function knobArc(gain) {
+    if (gain <= 0.001) return ''
+    const r       = 16
+    const startR  = -135 * Math.PI / 180
+    const endR    = knobAngle(gain) * Math.PI / 180
+    const sx      = +(20 + r * Math.sin(startR)).toFixed(2)
+    const sy      = +(20 - r * Math.cos(startR)).toFixed(2)
+    const ex      = +(20 + r * Math.sin(endR)).toFixed(2)
+    const ey      = +(20 - r * Math.cos(endR)).toFixed(2)
+    const large   = gain > 0.5 ? 1 : 0
+    return `M ${sx} ${sy} A ${r} ${r} 0 ${large} 1 ${ex} ${ey}`
+}
+
+// ── Knob drag ─────────────────────────────────────────────────────────────────
+let dragState = null
+
+function startKnobDrag(key, startGain, e) {
+    dragState = { key, startY: e.clientY, startGain }
+    window.addEventListener('mousemove', onKnobMove)
+    window.addEventListener('mouseup',   stopKnobDrag)
+}
+
+function onKnobMove(e) {
+    if (!dragState) return
+    const dy   = dragState.startY - e.clientY
+    const gain = Math.max(0, Math.min(1, dragState.startGain + dy / 150))
+    // Optimistic local update for smooth feel
+    if (audioChannels.value[dragState.key]) audioChannels.value[dragState.key].gain = gain
+    sendCommand({ type: 'set-audio-gain', sourceKey: dragState.key, gain: +gain.toFixed(3) })
+}
+
+function stopKnobDrag() {
+    dragState = null
+    window.removeEventListener('mousemove', onKnobMove)
+    window.removeEventListener('mouseup',   stopKnobDrag)
+}
+
+function vuClass(level) {
+    if (level > 0.85) return 'red'
+    if (level > 0.6)  return 'yellow'
+    return 'green'
+}
+
 // ── Plex ──────────────────────────────────────────────────────────────────────
 const PLEX_TOKEN_KEY   = 'eluth_plex_token'
 const PLEX_PRODUCT     = 'Eluth'
@@ -654,12 +762,18 @@ function onMessage(e) {
     const msg = e.data
     if (!msg?.type) return
 
+    if (msg.type === 'audio-levels') {
+        audioLevels.value = msg.levels
+        return
+    }
+
     if (msg.type === 'state') {
         scenes.value        = msg.scenes         ?? []
         activeSceneId.value = msg.activeSceneId  ?? null
         isStreaming.value   = msg.isStreaming     ?? false
         streamDuration.value = msg.streamDuration ?? '0:00'
         sourceRegistry.value = msg.sourceRegistry ?? {}
+        if (msg.audioChannels)              audioChannels.value = msg.audioChannels
         if (msg.pluginStates?.plex !== undefined) plexState.value = msg.pluginStates.plex
         // Sync settings form from main window state
         if (msg.settings) {
@@ -685,6 +799,8 @@ onMounted(() => {
 onUnmounted(() => {
     bc?.close()
     clearInterval(plexPinPoller)
+    window.removeEventListener('mousemove', onKnobMove)
+    window.removeEventListener('mouseup',   stopKnobDrag)
 })
 </script>
 
@@ -759,6 +875,76 @@ body { background: #0d0f18; font-family: 'Inter', system-ui, sans-serif; color: 
 
 /* Divider */
 .sc-divider { width: 1px; background: rgba(255,255,255,0.08); flex-shrink: 0; }
+
+/* Audio mixer panel */
+.sc-audio {
+    width: 200px; flex-shrink: 0;
+    display: flex; flex-direction: column;
+    border-right: 1px solid rgba(255,255,255,0.08);
+    overflow-y: auto;
+}
+.sc-audio-channels {
+    display: flex; flex-direction: row; gap: 6px;
+    padding: 6px 10px 10px; flex-wrap: wrap; align-items: flex-end;
+}
+.sc-audio-strip {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    width: 52px;
+}
+
+/* VU meter */
+.sc-vu-wrap { width: 10px; height: 80px; }
+.sc-vu-track {
+    width: 100%; height: 100%;
+    background: rgba(255,255,255,0.06); border-radius: 3px;
+    display: flex; align-items: flex-end; overflow: hidden;
+}
+.sc-vu-fill {
+    width: 100%; border-radius: 3px;
+    transition: height 0.08s linear;
+}
+.sc-vu-fill.green  { background: #22c55e; }
+.sc-vu-fill.yellow { background: #eab308; }
+.sc-vu-fill.red    { background: #ef4444; }
+
+/* Knob */
+.sc-knob {
+    width: 44px; height: 44px; cursor: ns-resize;
+    user-select: none; overflow: visible;
+}
+.sc-knob-track {
+    fill: none; stroke: rgba(255,255,255,0.1); stroke-width: 3;
+    stroke-linecap: round;
+}
+.sc-knob-value {
+    fill: none; stroke: #5865f2; stroke-width: 3; stroke-linecap: round;
+}
+.sc-knob-value.muted { stroke: #374151; }
+.sc-knob-line {
+    stroke: #e2e8f0; stroke-width: 2; stroke-linecap: round;
+}
+.sc-knob-line.muted { stroke: #4b5563; }
+
+.sc-audio-pct {
+    font-size: 9px; font-weight: 700; color: #64748b;
+    letter-spacing: 0.03em; text-align: center; line-height: 1;
+}
+.sc-audio-pct.muted { color: #374151; }
+
+.sc-audio-mute-btn {
+    background: none; border: none; cursor: pointer;
+    font-size: 14px; padding: 0; line-height: 1; opacity: 0.7;
+    transition: opacity 0.15s;
+}
+.sc-audio-mute-btn:hover { opacity: 1; }
+.sc-audio-mute-btn.muted { opacity: 1; }
+
+.sc-audio-lbl {
+    font-size: 9px; color: #475569; text-align: center;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    width: 100%; line-height: 1.2;
+}
+.sc-audio-lbl.muted { color: #374151; }
 
 /* Layers panel */
 .sc-layers {
