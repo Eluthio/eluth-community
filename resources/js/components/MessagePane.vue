@@ -17,6 +17,8 @@
                     :channel="props.channel"
                     :current-member="props.currentMember"
                     :can-stream="props.canStream"
+                    @stream-started="onPluginStreamStarted"
+                    @stream-stopped="onPluginStreamStopped"
                 />
 
                 <!-- Standard stream UI (when no compositor plugin, or user is a viewer) -->
@@ -297,9 +299,8 @@ const props = defineProps({
     messages:      { type: Array,  default: () => [] },
     members:       { type: Array,  default: () => [] },
     currentMember: { type: Object, default: null },
-    channel:         { type: Object, default: null },   // full channel object (type, is_live, etc.)
-    currentUsername: { type: String, default: '' },
-    canStream:       { type: Boolean, default: false },
+    channel:       { type: Object, default: null },   // full channel object (type, is_live, etc.)
+    canStream:     { type: Boolean, default: false },
     apiBase:       { type: String, default: '' },
     authToken:     { type: String, default: '' },
     enabledPlugins: { type: Array,  default: () => [] },
@@ -431,18 +432,21 @@ async function startStream(source = 'display') {
     }
 }
 
-const forceStopped  = ref(false)
-const forceStopBusy = ref(false)
+const forceStopped      = ref(false)
+const forceStopBusy     = ref(false)
+const pluginIsStreaming  = ref(false)
 
 // Reset local override when a new stream starts (so the bar can reappear if needed)
 watch(() => props.channel?.is_live, (val) => { if (val) forceStopped.value = false })
+
+function onPluginStreamStarted() { pluginIsStreaming.value = true }
+function onPluginStreamStopped() { pluginIsStreaming.value = false }
 
 const canForceStop = computed(() =>
     !forceStopped.value &&
     props.channel?.is_live &&
     !isStreaming.value &&
-    // Don't show to the active streamer — they should use the plugin's stop button
-    props.channel?.live_streamer_username !== props.currentUsername &&
+    !pluginIsStreaming.value &&
     (props.currentMember?.isAdmin || props.currentMember?.can('manage_channels'))
 )
 
