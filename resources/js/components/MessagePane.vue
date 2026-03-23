@@ -1,71 +1,90 @@
 <template>
     <div id="main">
 
-        <!-- Stream channel: player or offline placeholder -->
+        <!-- Stream channel -->
         <template v-if="props.channel?.type === 'stream'">
             <div class="stream-zone">
-                <!-- Streamer: local preview with sync/live overlay -->
-                <div v-if="isStreaming" class="stream-preview-wrap">
-                    <video ref="previewEl" class="stream-preview-local" autoplay muted playsinline />
-                    <div class="stream-sync-overlay" :class="{ 'stream-sync-overlay--live': streamSynced }">
-                        <span v-if="streamSynced">🔴 Live</span>
-                        <span v-else class="stream-syncing-text">
-                            <span class="stream-syncing-dot" />Synchronising…
-                        </span>
-                    </div>
-                </div>
 
-                <!-- Viewer: someone else is live -->
-                <StreamPlayer
-                    v-else-if="props.channel.is_live"
-                    :channel-id="props.channel.id"
+                <!-- stream-compositor zone: Advanced Streaming plugin takes over the streamer UI entirely -->
+                <component
+                    v-if="streamCompositorPlugin && props.canStream"
+                    :is="streamCompositorPlugin.component"
+                    class="stream-compositor-zone"
+                    :settings="pluginSettings[streamCompositorPlugin.slug] ?? {}"
                     :api-base="props.apiBase"
-                    :streamer-username="props.channel.live_streamer_username ?? ''"
-                    @error="onStreamError"
+                    :auth-token="props.authToken"
+                    :channel-id="props.channel.id"
+                    :channel="props.channel"
+                    :current-member="props.currentMember"
+                    :can-stream="props.canStream"
                 />
 
-                <!-- Not live: placeholder -->
-                <div v-else class="stream-offline">
-                    <div class="stream-offline-icon">📺</div>
-                    <div class="stream-offline-title">Nobody is streaming yet</div>
-                    <div v-if="props.canStream" class="stream-offline-hint">Click Go Live below to start streaming</div>
-                </div>
-
-                <!-- Source picker modal -->
-                <Teleport to="body">
-                    <div v-if="showSourcePicker" class="stream-source-overlay" @click.self="showSourcePicker = false">
-                        <div class="stream-source-modal">
-                            <div class="stream-source-title">Choose stream source</div>
-                            <div class="stream-source-options">
-                                <button class="stream-source-opt" @click="beginStream('display')">
-                                    <span class="stream-source-icon">🖥️</span>
-                                    <span class="stream-source-label">Desktop / Window</span>
-                                    <span class="stream-source-desc">Share your screen or an app window</span>
-                                </button>
-                                <button class="stream-source-opt" @click="beginStream('camera')">
-                                    <span class="stream-source-icon">📷</span>
-                                    <span class="stream-source-label">Webcam / Virtual Camera</span>
-                                    <span class="stream-source-desc">Use a webcam or OBS virtual camera</span>
-                                </button>
-                            </div>
-                            <button class="stream-source-cancel" @click="showSourcePicker = false">Cancel</button>
+                <!-- Standard stream UI (when no compositor plugin, or user is a viewer) -->
+                <template v-else>
+                    <!-- Streamer: local preview with sync/live overlay -->
+                    <div v-if="isStreaming" class="stream-preview-wrap">
+                        <video ref="previewEl" class="stream-preview-local" autoplay muted playsinline />
+                        <div class="stream-sync-overlay" :class="{ 'stream-sync-overlay--live': streamSynced }">
+                            <span v-if="streamSynced">🔴 Live</span>
+                            <span v-else class="stream-syncing-text">
+                                <span class="stream-syncing-dot" />Synchronising…
+                            </span>
                         </div>
                     </div>
-                </Teleport>
 
-                <!-- Streamer controls: shown to the user who has stream permission -->
-                <div v-if="props.canStream" class="stream-controls">
-                    <template v-if="!isStreaming">
-                        <button class="stream-go-live-btn" @click="openSourcePicker" :disabled="streamStarting || props.channel.is_live">
-                            {{ streamStarting ? 'Starting…' : props.channel.is_live ? 'Channel is live' : '🔴 Go Live' }}
-                        </button>
-                        <div v-if="streamError" class="stream-error">{{ streamError }}</div>
-                    </template>
-                    <template v-else>
-                        <div class="stream-live-indicator">{{ streamDuration }}</div>
-                        <button class="stream-stop-btn" @click="stopStream">⏹ Stop Stream</button>
-                    </template>
-                </div>
+                    <!-- Viewer: someone else is live -->
+                    <StreamPlayer
+                        v-else-if="props.channel.is_live"
+                        :channel-id="props.channel.id"
+                        :api-base="props.apiBase"
+                        :streamer-username="props.channel.live_streamer_username ?? ''"
+                        @error="onStreamError"
+                    />
+
+                    <!-- Not live: placeholder -->
+                    <div v-else class="stream-offline">
+                        <div class="stream-offline-icon">📺</div>
+                        <div class="stream-offline-title">Nobody is streaming yet</div>
+                        <div v-if="props.canStream" class="stream-offline-hint">Click Go Live below to start streaming</div>
+                    </div>
+
+                    <!-- Source picker modal -->
+                    <Teleport to="body">
+                        <div v-if="showSourcePicker" class="stream-source-overlay" @click.self="showSourcePicker = false">
+                            <div class="stream-source-modal">
+                                <div class="stream-source-title">Choose stream source</div>
+                                <div class="stream-source-options">
+                                    <button class="stream-source-opt" @click="beginStream('display')">
+                                        <span class="stream-source-icon">🖥️</span>
+                                        <span class="stream-source-label">Desktop / Window</span>
+                                        <span class="stream-source-desc">Share your screen or an app window</span>
+                                    </button>
+                                    <button class="stream-source-opt" @click="beginStream('camera')">
+                                        <span class="stream-source-icon">📷</span>
+                                        <span class="stream-source-label">Webcam / Virtual Camera</span>
+                                        <span class="stream-source-desc">Use a webcam or OBS virtual camera</span>
+                                    </button>
+                                </div>
+                                <button class="stream-source-cancel" @click="showSourcePicker = false">Cancel</button>
+                            </div>
+                        </div>
+                    </Teleport>
+
+                    <!-- Streamer controls -->
+                    <div v-if="props.canStream" class="stream-controls">
+                        <template v-if="!isStreaming">
+                            <button class="stream-go-live-btn" @click="openSourcePicker" :disabled="streamStarting || props.channel.is_live">
+                                {{ streamStarting ? 'Starting…' : props.channel.is_live ? 'Channel is live' : '🔴 Go Live' }}
+                            </button>
+                            <div v-if="streamError" class="stream-error">{{ streamError }}</div>
+                        </template>
+                        <template v-else>
+                            <div class="stream-live-indicator">{{ streamDuration }}</div>
+                            <button class="stream-stop-btn" @click="stopStream">⏹ Stop Stream</button>
+                        </template>
+                    </div>
+                </template>
+
             </div>
         </template>
 
@@ -742,6 +761,15 @@ const activeTopMenuPlugins = computed(() =>
         .filter(({ plugin }) => plugin?.zones?.includes('topmenu'))
         .map(({ slug, plugin }) => ({ slug, component: plugin.component, label: plugin.tabLabel ?? slug }))
 )
+
+// stream-compositor zone: first enabled plugin that declares this zone takes over the streamer UI
+const streamCompositorPlugin = computed(() => {
+    const entry = props.enabledPlugins
+        .map(slug => ({ slug, plugin: getPlugin(slug) }))
+        .find(({ plugin }) => plugin?.zones?.includes('stream-compositor'))
+    if (!entry) return null
+    return { slug: entry.slug, component: entry.plugin.component }
+})
 // Reset tab when switching channels
 watch(() => props.channel?.id, () => { activeTopMenuTab.value = null })
 
@@ -990,6 +1018,13 @@ watch(() => props.messages.length, async () => {
     margin-left: 2px;
 }
 .model-attachment-remove:hover { color: #f87171; }
+
+.stream-compositor-zone {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
 
 .stream-zone {
     display: flex;

@@ -225,12 +225,6 @@
                                         v-else
                                         @click="disablePlugin(plugin)"
                                     >Disable</button>
-                                    <button
-                                        v-if="plugin.tier !== 'official'"
-                                        class="settings-btn-ghost settings-btn-danger"
-                                        @click="uninstallPlugin(plugin)"
-                                        style="margin-left:6px;"
-                                    >Uninstall</button>
                                 </div>
                             </div>
 
