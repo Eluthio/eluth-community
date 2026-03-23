@@ -23,7 +23,32 @@ class StreamController extends Controller
         }
 
         if ($channel->is_live) {
-            return response()->json(['error' => 'already_live', 'message' => 'Someone is already streaming in this channel.'], 409);
+            // Auto-expire stale sessions: if the stream started more than 6 hours ago
+            // with no activity, treat it as a dead session and clear it automatically.
+            $staleThreshold = now()->subHours(6);
+            $isStale = $channel->live_started_at && $channel->live_started_at->lt($staleThreshold);
+
+            // Also treat as stale if state.json says not live (DB/file out of sync)
+            if (! $isStale) {
+                $statePath = 'streams/' . $channel->id . '/state.json';
+                if (Storage::disk('public')->exists($statePath)) {
+                    $state = json_decode(Storage::disk('public')->get($statePath), true);
+                    if (isset($state['is_live']) && ! $state['is_live']) {
+                        $isStale = true;
+                    }
+                }
+            }
+
+            if (! $isStale) {
+                return response()->json(['error' => 'already_live', 'message' => 'Someone is already streaming in this channel.'], 409);
+            }
+
+            // Clear the stale session before starting the new one
+            $channel->update([
+                'is_live'               => false,
+                'live_streamer_username' => null,
+                'live_started_at'       => null,
+            ]);
         }
 
         $mimeType = $request->input('mime_type', 'video/webm;codecs=vp8,opus');

@@ -85,7 +85,15 @@
                     </div>
                 </template>
 
+            <!-- Admin force-stop strip — visible to channel managers when a dead session is stuck -->
+            <div v-if="canForceStop" class="stream-force-stop-bar">
+                <span class="stream-force-stop-label">⚠ Stream appears stuck</span>
+                <button class="stream-force-stop-btn" :disabled="forceStopBusy" @click="forceStopStream">
+                    {{ forceStopBusy ? 'Stopping…' : 'Force Stop Stream' }}
+                </button>
             </div>
+
+        </div>
         </template>
 
         <!-- Plugin top-menu bar — hidden when no plugins use the topmenu zone -->
@@ -420,6 +428,25 @@ async function startStream(source = 'display') {
     } finally {
         streamStarting.value = false
     }
+}
+
+const canForceStop = computed(() =>
+    props.channel?.is_live &&
+    !isStreaming.value &&
+    (props.currentMember?.isAdmin || props.currentMember?.can('manage_channels'))
+)
+const forceStopBusy = ref(false)
+
+async function forceStopStream() {
+    if (!confirm('Force-stop the current stream? Only do this if the streamer has disconnected and the channel is stuck.')) return
+    forceStopBusy.value = true
+    try {
+        await fetch(`${props.apiBase}/api/streams/${props.channel.id}/stop`, {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + props.authToken },
+        })
+    } catch { /* ignore */ }
+    forceStopBusy.value = false
 }
 
 async function stopStream() {
@@ -1046,6 +1073,34 @@ watch(() => props.messages.length, async () => {
 .stream-offline-icon  { font-size: 40px; }
 .stream-offline-title { font-size: 15px; font-weight: 600; color: #94a3b8; }
 .stream-offline-hint  { font-size: 12px; }
+
+.stream-force-stop-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background: rgba(239,68,68,0.08);
+    border-top: 1px solid rgba(239,68,68,0.2);
+    gap: 10px;
+}
+.stream-force-stop-label {
+    font-size: 12px;
+    color: #f87171;
+}
+.stream-force-stop-btn {
+    background: rgba(239,68,68,0.15);
+    border: 1px solid rgba(239,68,68,0.4);
+    color: #f87171;
+    border-radius: 5px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+}
+.stream-force-stop-btn:hover { background: rgba(239,68,68,0.3); color: #fff; }
+.stream-force-stop-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .stream-controls {
     display: flex;
