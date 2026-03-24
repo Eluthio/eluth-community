@@ -94,7 +94,7 @@ function updateDuration() {
 
 // ── Fetch a single chunk ────────────────────────────────────────────────────
 async function fetchChunk(seq) {
-    const url = `${props.apiBase}/api/streams/${props.channelId}/chunks/${seq}`
+    const url = `${props.apiBase}/streams/${props.channelId}/chunks/${seq}`
     const res = await fetch(url)
     if (!res.ok) throw new Error(`chunk ${seq} returned ${res.status}`)
     return res.arrayBuffer()
@@ -172,7 +172,7 @@ function seekToLive() {
 async function pollState() {
     if (destroyed) return
     try {
-        const res = await fetch(`${props.apiBase}/api/streams/${props.channelId}/state`)
+        const res = await fetch(`${props.apiBase}/streams/${props.channelId}/state`)
         if (!res.ok) return
         const state = await res.json()
 
@@ -240,7 +240,7 @@ onMounted(async () => {
 
     // Fetch initial state
     try {
-        const res = await fetch(`${props.apiBase}/api/streams/${props.channelId}/state`)
+        const res = await fetch(`${props.apiBase}/streams/${props.channelId}/state`)
         if (res.ok) {
             const state = await res.json()
             if (state.is_live) {
