@@ -22,9 +22,15 @@
                 <div class="stream-live-badge">● LIVE</div>
                 <div class="stream-streamer">{{ streamerUsername }}</div>
                 <div class="stream-duration">{{ duration }}</div>
-                <button class="stream-mute-btn" @click="toggleMute" :title="muted ? 'Unmute' : 'Mute'">
-                    {{ muted ? '🔇' : '🔊' }}
-                </button>
+                <div class="stream-volume">
+                    <button class="stream-mute-btn" @click="toggleMute" :title="muted ? 'Unmute' : 'Mute'">
+                        {{ muted ? '🔇' : (volume < 0.4 ? '🔉' : '🔊') }}
+                    </button>
+                    <input v-if="!muted" type="range" class="stream-vol-slider"
+                        min="0" max="1" step="0.05"
+                        :value="volume"
+                        @input="setVolume(+$event.target.value)" />
+                </div>
             </div>
 
             <!-- Buffering indicator -->
@@ -59,6 +65,7 @@ const buffering    = ref(true)
 const catchingUp   = ref(false)
 const catchUpProgress = ref(0)
 const muted        = ref(true)   // autoplay requires muted; user can unmute
+const volume       = ref(1)
 const duration     = ref('')
 
 let mediaSource    = null
@@ -223,11 +230,21 @@ async function initMse(initialMimeType, initialLatestSeq) {
     })
 }
 
-// ── Mute toggle ─────────────────────────────────────────────────────────────
+// ── Mute / volume ────────────────────────────────────────────────────────────
 function toggleMute() {
     if (!videoEl.value) return
     muted.value = !muted.value
     videoEl.value.muted = muted.value
+}
+
+function setVolume(v) {
+    if (!videoEl.value) return
+    volume.value = v
+    videoEl.value.volume = v
+    if (v > 0 && muted.value) {
+        muted.value = false
+        videoEl.value.muted = false
+    }
 }
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
@@ -294,7 +311,7 @@ onUnmounted(() => {
     gap: 8px;
     padding: 8px 12px;
     background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent);
-    pointer-events: none;
+    pointer-events: none;  /* children use pointer-events: all to opt in */
 }
 
 .stream-live-badge {
@@ -321,8 +338,13 @@ onUnmounted(() => {
     margin-left: auto;
 }
 
-.stream-mute-btn {
+.stream-volume {
     pointer-events: all;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.stream-mute-btn {
     background: rgba(0,0,0,0.4);
     border: none;
     border-radius: 6px;
@@ -333,6 +355,11 @@ onUnmounted(() => {
     transition: background 0.15s;
 }
 .stream-mute-btn:hover { background: rgba(0,0,0,0.65); }
+.stream-vol-slider {
+    width: 72px;
+    accent-color: #22d3ee;
+    cursor: pointer;
+}
 
 .stream-buffering,
 .stream-catching-up {

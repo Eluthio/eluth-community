@@ -881,7 +881,7 @@ async function loadPlugins() {
                 .filter(p => p.is_enabled)
                 .map(p => {
                     const entry = p.manifest?.entry ?? 'index.js'
-                    return loadPlugin(p.slug, storageUrl, entry)
+                    return loadPlugin(p.slug, storageUrl, entry, p.manifest?.version ?? null)
                         .catch(e => console.warn(`[plugins] Failed to load "${p.slug}":`, e))
                 })
         )

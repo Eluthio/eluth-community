@@ -11,12 +11,13 @@ const _loading = {}
  * Dynamically load a plugin's compiled IIFE from storage.
  * The IIFE must set: window.__EluthPlugins[slug] = { component, zones: [...] }
  */
-export async function loadPlugin(slug, baseUrl, entry = 'index.js') {
+export async function loadPlugin(slug, baseUrl, entry = 'index.js', version = null) {
     if (window.__EluthPlugins?.[slug]) return window.__EluthPlugins[slug]
     if (_loading[slug]) return _loading[slug]
 
     _loading[slug] = new Promise((resolve, reject) => {
-        const url = `${baseUrl.replace(/\/$/, '')}/plugins/${slug}/${entry}`
+        const base = `${baseUrl.replace(/\/$/, '')}/plugins/${slug}/${entry}`
+        const url  = version ? `${base}?v=${encodeURIComponent(version)}` : base
         const script = document.createElement('script')
         script.src = url
         script.onload = () => {

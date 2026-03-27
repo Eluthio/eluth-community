@@ -142,6 +142,36 @@
                 <div v-else class="sc-empty" style="padding:20px 8px">
                     No audio.<br>Go live to see<br>channels.
                 </div>
+
+                <!-- Monitor output -->
+                <div class="sc-monitor-section">
+                    <div class="sc-monitor-label">Monitor</div>
+                    <div class="sc-monitor-controls">
+                        <!-- Monitor volume knob -->
+                        <svg class="sc-knob" viewBox="0 0 40 40"
+                            :class="{ muted: monitorMuted }"
+                            :title="`Monitor: ${Math.round(monitorVolume * 100)}%`"
+                            @mousedown.prevent="startMonitorKnobDrag($event)"
+                            @dblclick="sendCommand({ type: 'set-monitor-volume', volume: 1 }); monitorVolume = 1">
+                            <path class="sc-knob-track" d="M 8.7 31.3 A 16 16 0 1 1 31.3 31.3" />
+                            <path v-if="monitorVolume > 0" class="sc-knob-value"
+                                :class="{ muted: monitorMuted }"
+                                :d="knobArc(monitorVolume)" />
+                            <line x1="20" y1="20"
+                                :x2="knobTip(monitorVolume).x" :y2="knobTip(monitorVolume).y"
+                                class="sc-knob-line" :class="{ muted: monitorMuted }" />
+                        </svg>
+                        <div class="sc-audio-pct" :class="{ muted: monitorMuted }">
+                            {{ monitorMuted ? 'OFF' : Math.round(monitorVolume * 100) + '%' }}
+                        </div>
+                        <!-- Monitor toggle -->
+                        <button class="sc-monitor-toggle" :class="{ active: !monitorMuted }"
+                            :title="monitorMuted ? 'Enable monitor (headphones recommended)' : 'Disable monitor'"
+                            @click="monitorMuted = !monitorMuted; sendCommand({ type: 'set-monitor-muted', muted: monitorMuted })">
+                            🎧
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <!-- Divider -->
@@ -264,115 +294,11 @@
             </div>
         </div>
 
-        <!-- ── Plex panel ──────────────────────────────────────────────── -->
-        <div v-if="plexAvailable" class="sc-plex">
-
-            <div class="sc-plex-hdr" @click="plexExpanded = !plexExpanded">
-                <span class="sc-plex-hdr-icon">🎬</span>
-                <span class="sc-plex-hdr-label">Plex</span>
-                <span v-if="plexState?.title && !plexBrowsing" class="sc-plex-hdr-title">{{ plexState.title }}</span>
-                <span v-if="plexState?.isPlaying" class="sc-plex-hdr-live">▶</span>
-                <span class="sc-plex-chevron">{{ plexExpanded ? '▲' : '▼' }}</span>
-            </div>
-
-            <div v-if="plexExpanded" class="sc-plex-body">
-
-                <!-- Not authenticated -->
-                <template v-if="!plexToken">
-                    <div v-if="plexPinCode" class="sc-plex-pin-block">
-                        <div class="sc-plex-pin-hint">Visit <strong>plex.tv/link</strong> and enter:</div>
-                        <div class="sc-plex-pin-code">{{ plexPinCode }}</div>
-                        <div class="sc-plex-pin-waiting">Waiting… <span class="sc-plex-spinner" /></div>
-                    </div>
-                    <button v-else class="sc-btn sc-btn--ghost" @click="plexStartAuth" :disabled="plexConnecting">
-                        {{ plexConnecting ? 'Opening…' : 'Connect Plex Account' }}
-                    </button>
-                </template>
-
-                <!-- Authenticated -->
-                <template v-else>
-
-                    <!-- Transport controls (not browsing) -->
-                    <div v-if="!plexBrowsing" class="sc-plex-controls">
-                        <template v-if="plexState?.isConfigured">
-                            <div class="sc-plex-now-playing">{{ plexState.title || 'Ready' }}</div>
-                            <div class="sc-plex-transport">
-                                <button class="sc-plex-ctrl-btn"
-                                    @click="sendCommand({ type: plexState.isPlaying && !plexState.isPaused ? 'plex-pause' : 'plex-resume' })">
-                                    {{ plexState.isPlaying && !plexState.isPaused ? '⏸' : '▶' }}
-                                </button>
-                                <div class="sc-plex-seek-wrap">
-                                    <input type="range" class="sc-plex-seek"
-                                        min="0" :max="Math.round(plexState.duration) || 100" step="1"
-                                        :value="Math.round(plexState.currentTime)"
-                                        @change="sendCommand({ type: 'plex-seek', time: +$event.target.value })" />
-                                    <span class="sc-plex-time">
-                                        {{ formatPlexTime(plexState.currentTime) }} / {{ formatPlexTime(plexState.duration) }}
-                                    </span>
-                                </div>
-                                <button class="sc-plex-ctrl-btn sc-plex-ctrl-btn--stop"
-                                    @click="sendCommand({ type: 'plex-stop' })">⏹</button>
-                            </div>
-                        </template>
-                        <div v-else class="sc-plex-empty-hint">No content selected.</div>
-                        <div class="sc-plex-actions">
-                            <button class="sc-btn sc-btn--ghost" @click="plexOpenBrowser">
-                                {{ plexState?.isConfigured ? 'Change Content' : 'Browse Library' }}
-                            </button>
-                            <button class="sc-plex-disconnect" @click="plexDisconnect">Disconnect</button>
-                        </div>
-                    </div>
-
-                    <!-- Library browser -->
-                    <div v-else class="sc-plex-browser">
-                        <button v-if="plexState?.isConfigured" class="sc-plex-back-btn" @click="plexBrowsing = false">← Back</button>
-
-                        <!-- Server list -->
-                        <div v-if="plexBrowseStep === 'servers'">
-                            <div class="sc-plex-browse-title">Choose Server</div>
-                            <div v-if="plexServersLoading" class="sc-plex-loading">Loading servers…</div>
-                            <div v-else class="sc-plex-list">
-                                <button v-for="s in plexServers" :key="s.clientIdentifier"
-                                    class="sc-plex-list-item" @click="selectPlexServer(s)">
-                                    <span>🖥</span><span>{{ s.name }}</span>
-                                </button>
-                                <div v-if="!plexServers.length" class="sc-plex-empty">No servers found.</div>
-                            </div>
-                        </div>
-
-                        <!-- Library sections -->
-                        <div v-else-if="plexBrowseStep === 'sections'">
-                            <button class="sc-plex-back-btn" @click="plexBrowseStep = 'servers'">← {{ plexActiveServer?.name }}</button>
-                            <div class="sc-plex-list" style="margin-top:6px">
-                                <button v-for="sec in plexSections" :key="sec.key"
-                                    class="sc-plex-list-item" @click="openPlexSection(sec)">
-                                    <span>{{ plexSectionIcon(sec.type) }}</span><span>{{ sec.title }}</span>
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Items grid -->
-                        <div v-else-if="plexBrowseStep === 'items'">
-                            <button class="sc-plex-back-btn" @click="plexGoBack">← Back</button>
-                            <div v-if="plexBrowseTitle" class="sc-plex-browse-title">{{ plexBrowseTitle }}</div>
-                            <div v-if="plexItemsLoading" class="sc-plex-loading">Loading…</div>
-                            <div v-else class="sc-plex-grid">
-                                <button v-for="item in plexItems" :key="item.ratingKey"
-                                    class="sc-plex-grid-item" :title="item.title" @click="selectPlexItem(item)">
-                                    <img v-if="item.thumb && plexActiveServer"
-                                        :src="`${plexActiveServer.uri}${item.thumb}?X-Plex-Token=${plexActiveServer.accessToken}`"
-                                        class="sc-plex-thumb" loading="lazy" />
-                                    <span v-else class="sc-plex-thumb-ph">🎬</span>
-                                    <span class="sc-plex-item-label">{{ item.title }}</span>
-                                </button>
-                                <div v-if="!plexItems.length" class="sc-plex-empty">No items.</div>
-                            </div>
-                        </div>
-                    </div>
-
-                </template>
-            </div>
-        </div>
+        <!-- ── Plugin controls (loaded dynamically from plugin scripts) ── -->
+        <template v-for="(ctrl, key) in pluginControls" :key="key">
+            <div class="sc-divider" />
+            <component :is="ctrl" :state="pluginStates[key]" :send-command="sendCommand" />
+        </template>
 
         <!-- Footer -->
         <div class="sc-footer">
@@ -406,6 +332,10 @@ const activeSceneId  = ref(null)
 const isStreaming     = ref(false)
 const streamDuration  = ref('0:00')
 const sourceRegistry  = ref({})   // { key: { label, icon } }
+
+const pluginStates    = ref({})   // { sourceKey: pluginState } — from broadcast
+const pluginControls  = ref({})   // { sourceKey: VueComponent } — loaded dynamically
+let   pluginSlugsLoaded = new Set()
 
 const activeScene   = computed(() => scenes.value.find(s => s.id === activeSceneId.value) ?? null)
 const selectedLayerId = ref(null)
@@ -517,8 +447,27 @@ function sourceIcon(key) { return sourceRegistry.value[key]?.icon ?? '📹' }
 function sourceName(key) { return sourceRegistry.value[key]?.label ?? key }
 
 // ── Audio mixer ───────────────────────────────────────────────────────────────
-const audioChannels = ref({})   // { sourceKey: { gain, muted, label, icon } }
-const audioLevels   = ref({})   // { sourceKey: 0.0-1.0 } — from fast BC messages
+const audioChannels  = ref({})   // { sourceKey: { gain, muted, label, icon } }
+const audioLevels    = ref({})   // { sourceKey: 0.0-1.0 } — from fast BC messages
+const monitorVolume  = ref(1)
+const monitorMuted   = ref(true)  // default off to avoid feedback
+
+// ── Plugin controls loader ────────────────────────────────────────────────────
+function loadPluginControls(registry) {
+    const baseUrl = window._eluthCommunityUrl ?? ''
+    for (const [key, entry] of Object.entries(registry)) {
+        if (!entry.slug || pluginSlugsLoaded.has(entry.slug)) continue
+        pluginSlugsLoaded.add(entry.slug)
+        const s = document.createElement('script')
+        s.src = `${baseUrl}/storage/plugins/${entry.slug}/index.js`
+        s.onload = () => {
+            if (window.__EluthPluginControls?.[key]) {
+                pluginControls.value = { ...pluginControls.value, [key]: window.__EluthPluginControls[key] }
+            }
+        }
+        document.head.appendChild(s)
+    }
+}
 
 // ── Knob helpers ──────────────────────────────────────────────────────────────
 function knobAngle(gain) { return -135 + gain * 270 }
@@ -565,196 +514,33 @@ function stopKnobDrag() {
     window.removeEventListener('mouseup',   stopKnobDrag)
 }
 
+// Monitor knob drag (separate from per-source knobs)
+let monitorDragState = null
+
+function startMonitorKnobDrag(e) {
+    monitorDragState = { startY: e.clientY, startGain: monitorVolume.value }
+    window.addEventListener('mousemove', onMonitorKnobMove)
+    window.addEventListener('mouseup',   stopMonitorKnobDrag)
+}
+
+function onMonitorKnobMove(e) {
+    if (!monitorDragState) return
+    const dy  = monitorDragState.startY - e.clientY
+    const vol = +Math.max(0, Math.min(1, monitorDragState.startGain + dy / 150)).toFixed(3)
+    monitorVolume.value = vol
+    sendCommand({ type: 'set-monitor-volume', volume: vol })
+}
+
+function stopMonitorKnobDrag() {
+    monitorDragState = null
+    window.removeEventListener('mousemove', onMonitorKnobMove)
+    window.removeEventListener('mouseup',   stopMonitorKnobDrag)
+}
+
 function vuClass(level) {
     if (level > 0.85) return 'red'
     if (level > 0.6)  return 'yellow'
     return 'green'
-}
-
-// ── Plex ──────────────────────────────────────────────────────────────────────
-const PLEX_TOKEN_KEY   = 'eluth_plex_token'
-const PLEX_PRODUCT     = 'Eluth'
-const PLEX_CLIENT_ID   = 'eluth-plugin-plex'
-
-const plexExpanded      = ref(false)
-const plexBrowsing      = ref(false)
-const plexToken         = ref(localStorage.getItem(PLEX_TOKEN_KEY))
-const plexState         = ref(null)   // mirrored from main window
-
-const plexConnecting    = ref(false)
-const plexPinCode       = ref(null)
-const plexPinId         = ref(null)
-let   plexPinPoller     = null
-
-const plexBrowseStep    = ref('servers')
-const plexServers       = ref([])
-const plexServersLoading = ref(false)
-const plexActiveServer  = ref(null)
-const plexSections      = ref([])
-const plexItems         = ref([])
-const plexItemsLoading  = ref(false)
-const plexBrowseStack   = ref([])
-const plexBrowseTitle   = ref('')
-
-const plexAvailable = computed(() => 'plex' in sourceRegistry.value)
-
-function plexHeaders(token) {
-    return {
-        'Accept': 'application/json',
-        'X-Plex-Product': PLEX_PRODUCT, 'X-Plex-Version': '1.0.0',
-        'X-Plex-Client-Identifier': PLEX_CLIENT_ID, 'X-Plex-Platform': 'Web',
-        ...(token ? { 'X-Plex-Token': token } : {}),
-    }
-}
-
-async function plexStartAuth() {
-    plexConnecting.value = true
-    try {
-        const res  = await fetch('https://plex.tv/api/v2/pins', {
-            method: 'POST', headers: plexHeaders(),
-            body: new URLSearchParams({ strong: 'false' }),
-        })
-        const data = await res.json()
-        plexPinCode.value = data.code
-        plexPinId.value   = data.id
-        startPlexPinPoller()
-    } catch { /* ignore */ }
-    plexConnecting.value = false
-}
-
-function startPlexPinPoller() {
-    clearInterval(plexPinPoller)
-    plexPinPoller = setInterval(async () => {
-        try {
-            const res  = await fetch(`https://plex.tv/api/v2/pins/${plexPinId.value}`, { headers: plexHeaders() })
-            const data = await res.json()
-            if (data.authToken) {
-                clearInterval(plexPinPoller)
-                localStorage.setItem(PLEX_TOKEN_KEY, data.authToken)
-                plexToken.value   = data.authToken
-                plexPinCode.value = null
-                await plexLoadServers()
-                plexBrowsing.value = true
-            }
-        } catch { /* network hiccup */ }
-    }, 2000)
-}
-
-async function plexLoadServers() {
-    plexServersLoading.value = true
-    plexBrowseStep.value = 'servers'
-    try {
-        const res       = await fetch('https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1', { headers: plexHeaders(plexToken.value) })
-        const resources = await res.json()
-        plexServers.value = resources.filter(r => r.provides?.includes('server'))
-    } catch { plexServers.value = [] }
-    plexServersLoading.value = false
-}
-
-async function plexOpenBrowser() {
-    plexBrowsing.value = true
-    if (!plexServers.value.length) await plexLoadServers()
-}
-
-async function selectPlexServer(server) {
-    const conns = server.connections ?? []
-    const uri   = (conns.find(c => c.protocol === 'https' && !c.relay)
-               ?? conns.find(c => !c.relay)
-               ?? conns[0])?.uri ?? ''
-    plexActiveServer.value = { name: server.name, uri, accessToken: server.accessToken ?? plexToken.value }
-    plexBrowseStep.value = 'sections'
-    try {
-        const text = await plexServerFetch('/library/sections')
-        plexSections.value = parsePlexXml(text, 'Directory').map(el => ({
-            key: el.getAttribute('key'), title: el.getAttribute('title'), type: el.getAttribute('type'),
-        }))
-    } catch { plexSections.value = [] }
-}
-
-async function openPlexSection(sec) {
-    plexBrowseStack.value  = []
-    plexBrowseTitle.value  = sec.title
-    plexBrowseStep.value   = 'items'
-    plexItemsLoading.value = true
-    try {
-        plexItems.value = await fetchPlexItems(`/library/sections/${sec.key}/all`)
-    } catch { plexItems.value = [] }
-    plexItemsLoading.value = false
-}
-
-async function plexDrillInto(item) {
-    plexBrowseStack.value.push({ title: plexBrowseTitle.value, items: plexItems.value })
-    plexBrowseTitle.value  = item.title
-    plexItemsLoading.value = true
-    try {
-        plexItems.value = await fetchPlexItems(`/library/metadata/${item.ratingKey}/children`)
-    } catch { plexItems.value = [] }
-    plexItemsLoading.value = false
-}
-
-function plexGoBack() {
-    if (plexBrowseStack.value.length) {
-        const prev = plexBrowseStack.value.pop()
-        plexItems.value = prev.items
-        plexBrowseTitle.value = prev.title
-    } else {
-        plexBrowseStep.value = 'sections'
-    }
-}
-
-async function selectPlexItem(item) {
-    const drillTypes = ['show', 'season', 'artist', 'album']
-    if (drillTypes.includes(item.type)) { await plexDrillInto(item); return }
-    const srv = plexActiveServer.value
-    sendCommand({
-        type:   'plex-play',
-        config: { serverUri: srv.uri, accessToken: srv.accessToken, serverName: srv.name, ratingKey: item.ratingKey, title: item.title },
-    })
-    plexBrowsing.value = false
-}
-
-async function plexServerFetch(path) {
-    const srv = plexActiveServer.value
-    const res = await fetch(`${srv.uri}${path}?X-Plex-Token=${srv.accessToken}`)
-    if (!res.ok) throw new Error(`Server error ${res.status}`)
-    return res.text()
-}
-
-function parsePlexXml(text, ...tags) {
-    const doc = new DOMParser().parseFromString(text, 'text/xml')
-    return tags.flatMap(t => [...doc.querySelectorAll(t)])
-}
-
-async function fetchPlexItems(path) {
-    const text = await plexServerFetch(path)
-    return parsePlexXml(text, 'Video', 'Directory')
-        .filter(el => el.getAttribute('ratingKey'))
-        .map(el => ({
-            ratingKey: el.getAttribute('ratingKey'),
-            title:     el.getAttribute('title'),
-            thumb:     el.getAttribute('thumb') ?? el.getAttribute('art'),
-            type:      el.getAttribute('type'),
-        }))
-        .sort((a, b) => (a.title ?? '').localeCompare(b.title ?? ''))
-}
-
-function plexSectionIcon(type) {
-    return type === 'movie' ? '🎬' : type === 'show' ? '📺' : type === 'artist' ? '🎵' : '📁'
-}
-
-function formatPlexTime(secs) {
-    if (!secs || !isFinite(secs)) return '0:00'
-    const m = Math.floor(secs / 60), s = Math.floor(secs % 60)
-    return `${m}:${String(s).padStart(2, '0')}`
-}
-
-function plexDisconnect() {
-    localStorage.removeItem(PLEX_TOKEN_KEY)
-    plexToken.value = null
-    plexServers.value = []
-    plexActiveServer.value = null
-    plexBrowsing.value = false
-    sendCommand({ type: 'plex-stop' })
 }
 
 // ── BroadcastChannel setup ────────────────────────────────────────────────────
@@ -773,8 +559,11 @@ function onMessage(e) {
         isStreaming.value   = msg.isStreaming     ?? false
         streamDuration.value = msg.streamDuration ?? '0:00'
         sourceRegistry.value = msg.sourceRegistry ?? {}
-        if (msg.audioChannels)              audioChannels.value = msg.audioChannels
-        if (msg.pluginStates?.plex !== undefined) plexState.value = msg.pluginStates.plex
+        if (msg.sourceRegistry) loadPluginControls(msg.sourceRegistry)
+        if (msg.audioChannels)              audioChannels.value  = msg.audioChannels
+        if (msg.monitorVolume !== undefined) monitorVolume.value = msg.monitorVolume
+        if (msg.monitorMuted  !== undefined) monitorMuted.value  = msg.monitorMuted
+        if (msg.pluginStates) pluginStates.value = { ...pluginStates.value, ...msg.pluginStates }
         // Sync settings form from main window state
         if (msg.settings) {
             settingsForm.value.transitionType     = msg.settings.transition?.type     ?? 'fade'
@@ -784,8 +573,8 @@ function onMessage(e) {
         }
     }
 
-    if (msg.type === 'plex-state') {
-        plexState.value = msg.plex
+    if (msg.type === 'plugin-state') {
+        pluginStates.value = { ...pluginStates.value, [msg.key]: msg.state }
     }
 }
 
@@ -798,7 +587,6 @@ onMounted(() => {
 
 onUnmounted(() => {
     bc?.close()
-    clearInterval(plexPinPoller)
     window.removeEventListener('mousemove', onKnobMove)
     window.removeEventListener('mouseup',   stopKnobDrag)
 })
@@ -946,6 +734,33 @@ body { background: #0d0f18; font-family: 'Inter', system-ui, sans-serif; color: 
 }
 .sc-audio-lbl.muted { color: #374151; }
 
+/* Monitor output */
+.sc-monitor-section {
+    padding: 8px 10px 10px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    flex-shrink: 0;
+}
+.sc-monitor-label {
+    font-size: 9px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: rgba(255,255,255,0.3); margin-bottom: 6px;
+}
+.sc-monitor-controls {
+    display: flex; align-items: center; gap: 6px;
+}
+.sc-monitor-toggle {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px; cursor: pointer;
+    font-size: 16px; padding: 3px 6px; line-height: 1;
+    opacity: 0.45; transition: opacity 0.15s, background 0.15s;
+}
+.sc-monitor-toggle:hover { opacity: 0.8; }
+.sc-monitor-toggle.active {
+    opacity: 1;
+    background: rgba(88,101,242,0.25);
+    border-color: rgba(88,101,242,0.5);
+}
+
 /* Layers panel */
 .sc-layers {
     flex: 1; min-width: 0;
@@ -1091,57 +906,4 @@ body { background: #0d0f18; font-family: 'Inter', system-ui, sans-serif; color: 
 /* Misc */
 .sc-empty { font-size: 12px; color: #374151; text-align: center; padding: 16px 8px; }
 
-/* ── Plex panel ── */
-.sc-plex { border-top: 1px solid rgba(255,255,255,0.08); flex-shrink: 0; }
-.sc-plex-hdr {
-    display: flex; align-items: center; gap: 8px;
-    padding: 8px 14px; cursor: pointer; user-select: none;
-    background: #13151f; transition: background 0.15s;
-}
-.sc-plex-hdr:hover { background: rgba(255,255,255,0.04); }
-.sc-plex-hdr-icon  { font-size: 14px; }
-.sc-plex-hdr-label { font-size: 12px; font-weight: 700; color: #94a3b8; flex-shrink: 0; }
-.sc-plex-hdr-title { font-size: 11px; color: #64748b; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.sc-plex-hdr-live  { font-size: 10px; color: #4ade80; flex-shrink: 0; }
-.sc-plex-chevron   { font-size: 9px; color: #475569; margin-left: auto; flex-shrink: 0; }
-
-.sc-plex-body { padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow-y: auto; }
-
-.sc-plex-pin-block  { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 6px 0; }
-.sc-plex-pin-hint   { font-size: 12px; color: #94a3b8; text-align: center; }
-.sc-plex-pin-code   { font-size: 26px; font-weight: 800; color: #e2a31a; letter-spacing: 0.15em; font-family: monospace; }
-.sc-plex-pin-waiting { font-size: 11px; color: #64748b; display: flex; align-items: center; gap: 6px; }
-.sc-plex-spinner    { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.1); border-top-color: #e2a31a; border-radius: 50%; animation: plexSpin 0.8s linear infinite; }
-@keyframes plexSpin { to { transform: rotate(360deg); } }
-
-.sc-plex-controls   { display: flex; flex-direction: column; gap: 8px; }
-.sc-plex-now-playing { font-size: 13px; font-weight: 600; color: #e2e8f0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sc-plex-transport  { display: flex; align-items: center; gap: 6px; background: rgba(0,0,0,0.3); border-radius: 6px; padding: 6px 8px; }
-.sc-plex-ctrl-btn   { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #e2e8f0; border-radius: 5px; width: 28px; height: 28px; cursor: pointer; font-size: 12px; transition: all 0.15s; flex-shrink: 0; }
-.sc-plex-ctrl-btn:hover { background: rgba(255,255,255,0.16); }
-.sc-plex-ctrl-btn--stop { color: #f87171; }
-.sc-plex-seek-wrap  { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.sc-plex-seek       { width: 100%; accent-color: #e2a31a; cursor: pointer; }
-.sc-plex-time       { font-size: 10px; color: #64748b; text-align: right; }
-.sc-plex-empty-hint { font-size: 12px; color: #475569; }
-.sc-plex-actions    { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.sc-plex-disconnect { background: none; border: none; color: #374151; font-size: 11px; cursor: pointer; padding: 0; transition: color 0.15s; }
-.sc-plex-disconnect:hover { color: #64748b; }
-
-/* Browser */
-.sc-plex-browser    { display: flex; flex-direction: column; gap: 6px; }
-.sc-plex-back-btn   { background: none; border: none; color: #94a3b8; font-size: 12px; cursor: pointer; text-align: left; padding: 2px 0; }
-.sc-plex-back-btn:hover { color: #e2e8f0; }
-.sc-plex-browse-title { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.06em; padding: 4px 0 2px; }
-.sc-plex-loading    { font-size: 12px; color: #475569; padding: 6px 0; }
-.sc-plex-empty      { font-size: 12px; color: #374151; padding: 6px 0; }
-.sc-plex-list       { display: flex; flex-direction: column; gap: 4px; }
-.sc-plex-list-item  { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 6px; color: #e2e8f0; cursor: pointer; font-size: 13px; transition: all 0.15s; text-align: left; }
-.sc-plex-list-item:hover { background: rgba(255,255,255,0.08); border-color: #e2a31a; }
-.sc-plex-grid       { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; }
-.sc-plex-grid-item  { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 4px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 6px; cursor: pointer; color: #cbd5e1; transition: all 0.15s; }
-.sc-plex-grid-item:hover { background: rgba(255,255,255,0.1); border-color: #e2a31a; }
-.sc-plex-thumb      { width: 100%; aspect-ratio: 2/3; object-fit: cover; border-radius: 3px; }
-.sc-plex-thumb-ph   { font-size: 22px; }
-.sc-plex-item-label { font-size: 10px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; }
 </style>

@@ -7,7 +7,7 @@
 
                 <!-- stream-compositor zone: Advanced Streaming plugin takes over the streamer UI entirely -->
                 <component
-                    v-if="streamCompositorPlugin && props.canStream"
+                    v-if="streamCompositorPlugin && props.canStream && (!props.channel.is_live || pluginIsStreaming)"
                     :is="streamCompositorPlugin.component"
                     class="stream-compositor-zone"
                     :settings="pluginSettings[streamCompositorPlugin.slug] ?? {}"
