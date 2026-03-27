@@ -221,7 +221,10 @@ async function initMse(initialMimeType, initialLatestSeq) {
             const useMime = candidateMimes.find(m => MediaSource.isTypeSupported(m)) ?? 'video/webm'
 
             sourceBuffer = mediaSource.addSourceBuffer(useMime)
-            sourceBuffer.mode = 'sequence'   // handle timestamps automatically
+            // 'segments' respects the original webm timestamps from MediaRecorder,
+            // keeping audio and video aligned. 'sequence' remaps timestamps and can
+            // cause cumulative A/V drift.
+            sourceBuffer.mode = 'segments'
 
             pumpChunks()
         } catch (e) {
