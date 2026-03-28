@@ -34,7 +34,6 @@ class PluginRoomController extends Controller
             return response()->json(['message' => 'A game is already in progress in this channel.'], 409);
         }
 
-        $user  = $request->user();
         $seats = $data['max_players'] ?? 2;
 
         $room = PluginRoom::create([
@@ -66,12 +65,12 @@ class PluginRoomController extends Controller
                 ->lockForUpdate()
                 ->findOrFail($id);
 
-            $user        = $request->user();
+            $member      = $request->attributes->get('member');
             $playerIds   = $room->player_ids   ?? [];
             $playerNames = $room->player_names ?? [];
 
             // Already seated?
-            $existingSeat = array_search($user->id, $playerIds);
+            $existingSeat = array_search($member->central_user_id, $playerIds);
             if ($existingSeat !== false) {
                 return response()->json(['seat' => $existingSeat + 1, 'room' => $room]);
             }
@@ -82,8 +81,8 @@ class PluginRoomController extends Controller
                 return response()->json(['message' => 'All seats are taken.'], 409);
             }
 
-            $playerIds[$slot]   = $user->id;
-            $playerNames[$slot] = $user->username ?? $user->name ?? ('Player ' . ($slot + 1));
+            $playerIds[$slot]   = $member->central_user_id;
+            $playerNames[$slot] = $member->username ?? ('Player ' . ($slot + 1));
 
             $allFilled = !in_array(null, $playerIds);
 
