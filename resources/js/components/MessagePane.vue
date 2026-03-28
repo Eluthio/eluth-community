@@ -282,6 +282,17 @@
                 <template v-if="menu.isSelf">
                     <button class="ctx-item" @click="emit('open-user-settings'); closeMenu()">Your Settings</button>
                 </template>
+
+                <!-- Plugin context menu items -->
+                <template v-if="pluginCtxItems.length && !menu.isSelf">
+                    <div class="ctx-separator" />
+                    <button
+                        v-for="item in pluginCtxItems.filter(i => !i.when || i.when(menu))"
+                        :key="item.label"
+                        class="ctx-item"
+                        @click="item.action({ author: menu.author, memberId: menu.memberId, channelId: props.channel?.id }); closeMenu()"
+                    >{{ item.label }}</button>
+                </template>
             </div>
         </Teleport>
     </div>
@@ -756,6 +767,11 @@ function doViewProfile() {
     closeMenu()
 }
 function doKick()   { if (menu.memberId) emit('kick', menu.memberId); closeMenu() }
+
+const pluginCtxItems = computed(() => {
+    const plugins = window.__EluthPlugins ?? {}
+    return Object.values(plugins).flatMap(p => p.contextMenuItems ?? [])
+})
 function doBan()    { if (menu.memberId) emit('ban',  menu.memberId); closeMenu() }
 function doSendDm() { if (menu.memberId) emit('open-dm', { id: menu.memberId, username: menu.author }); closeMenu() }
 

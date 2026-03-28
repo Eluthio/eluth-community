@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\PluginController;
 use App\Http\Controllers\Api\StreamController;
 use App\Http\Controllers\Api\PollController;
 use App\Http\Controllers\Api\WatchPartyController;
+use App\Http\Controllers\Api\PluginRoomController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -217,6 +218,16 @@ Route::middleware('auth.central')->group(function () {
         if (! file_exists($logPath)) return response()->json(['lines' => []]);
         $lines = array_slice(file($logPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES), -300);
         return response()->json(['lines' => array_values($lines)]);
+    });
+
+    // Generic plugin rooms (multi-user plugin sessions: pong, games, etc.)
+    Route::prefix('/plugin-rooms/{slug}')->group(function () {
+        Route::get('/channels/{channelId}', [PluginRoomController::class, 'activeForChannel']);
+        Route::post('/',                    [PluginRoomController::class, 'create']);
+        Route::get('/{id}',                 [PluginRoomController::class, 'get']);
+        Route::post('/{id}/seat',           [PluginRoomController::class, 'claimSeat']);
+        Route::put('/{id}/data',            [PluginRoomController::class, 'updateData']);
+        Route::post('/{id}/close',          [PluginRoomController::class, 'close']);
     });
 
     // Streaming — mutating endpoints require auth
