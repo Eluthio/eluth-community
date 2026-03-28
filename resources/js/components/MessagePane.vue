@@ -842,9 +842,13 @@ function insertFromPlugin(value) {
         return
     }
     if (typeof value === 'string' && (value.startsWith('http://') || value.startsWith('https://'))) {
-        pendingGif.value = value
-        nextTick(() => inputEl.value?.focus())
-        return
+        // If a plugin claims this URL, insert as plain text so it renders as a card
+        if (renderMessageUrl(value) == null) {
+            pendingGif.value = value
+            nextTick(() => inputEl.value?.focus())
+            return
+        }
+        // Fall through to plain-text insertion below
     }
     const el     = inputEl.value
     const cursor = el?.selectionStart ?? draft.value.length
