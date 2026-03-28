@@ -527,6 +527,9 @@ function renderContent(content) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
 
+    // Let plugins intercept any URL they recognise (must run before gif/image patterns)
+    safe = safe.replace(/https?:\/\/[^\s<>]+/g, rawUrl => renderMessageUrl(rawUrl) ?? rawUrl)
+
     // Embed GIF/image URLs from known CDNs
     const gifPattern = /https?:\/\/(media\d*\.tenor\.com|c\.tenor\.com|media\d*\.giphy\.com|i\.giphy\.com)\/\S+\.(gif|webp|mp4)(\?\S*)?/gi
     safe = safe.replace(gifPattern, url => `<img src="${url}" class="msg-gif" alt="GIF" loading="lazy" />`)
