@@ -16,6 +16,7 @@ class AdminController extends Controller
     private const PLUGIN_PERMISSION_CATEGORIES = [
         'polls'       => 'Polls',
         'watch-party' => 'Watch Party',
+        'rpg'         => 'Tabletop RPG',
     ];
 
     private function requirePermission(Request $request, string $permission): void

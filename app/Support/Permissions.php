@@ -34,6 +34,8 @@ class Permissions
     // Polls plugin
     const POLL_CREATE   = 'poll.create';
     const POLL_MODERATE = 'poll.moderate';
+    // RPG plugin
+    const RPG_GM = 'rpg.gm';
 
     const ALL = [
         self::MANAGE_SERVER, self::MANAGE_ROLES, self::VIEW_AUDIT_LOG,
@@ -46,6 +48,7 @@ class Permissions
         self::STREAM,
         self::WATCH_PARTY_PROPOSE, self::WATCH_PARTY_MODERATE, self::WATCH_PARTY_CONTROL,
         self::POLL_CREATE, self::POLL_MODERATE,
+        self::RPG_GM,
     ];
 
     const CATEGORIES = [
@@ -91,6 +94,9 @@ class Permissions
             self::WATCH_PARTY_PROPOSE  => 'Propose videos to the watch party queue',
             self::WATCH_PARTY_MODERATE => 'Approve or reject watch party proposals',
             self::WATCH_PARTY_CONTROL  => 'Control watch party playback (start, pause, seek)',
+        ],
+        'Tabletop RPG' => [
+            self::RPG_GM => 'Game Master — create and run RPG sessions',
         ],
     ];
 

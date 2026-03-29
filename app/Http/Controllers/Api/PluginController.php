@@ -12,7 +12,6 @@ class PluginController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        file_put_contents(storage_path('uninstall_debug.txt'), date('H:i:s') . " index() called\n", FILE_APPEND);
         $plugins = Plugin::all()->map(function (Plugin $p) {
             $manifest = $p->manifest;
             if (isset($manifest['settings'])) {
@@ -224,22 +223,17 @@ class PluginController extends Controller
 
         // Run plugin teardown (drops its tables) before files are removed
         $teardownFile = storage_path('app/public/plugins/' . $slug . '/backend/teardown.php');
-        file_put_contents(storage_path('uninstall_debug.txt'), date('H:i:s') . " uninstall [{$slug}] called\n", FILE_APPEND);
-        \Log::error("Plugin uninstall [{$slug}]: teardown file " . (file_exists($teardownFile) ? 'FOUND' : 'NOT FOUND') . " at {$teardownFile}");
         if (file_exists($teardownFile)) {
             try {
                 require $teardownFile;
-                \Log::error("Plugin uninstall [{$slug}]: teardown ran OK");
             } catch (\Throwable $e) {
-                \Log::error("Plugin teardown failed for [{$slug}]: " . $e->getMessage());
+                // teardown failure is non-fatal — files are removed regardless
             }
         }
 
         // Remove migration tracking records
-        \Log::error("Plugin uninstall [{$slug}]: plugin_migrations exists=" . (Schema::hasTable('plugin_migrations') ? 'yes' : 'no'));
         if (Schema::hasTable('plugin_migrations')) {
-            $deleted = \DB::table('plugin_migrations')->where('slug', $slug)->delete();
-            \Log::error("Plugin uninstall [{$slug}]: deleted {$deleted} plugin_migrations rows");
+            \DB::table('plugin_migrations')->where('slug', $slug)->delete();
         }
 
         // Remove files

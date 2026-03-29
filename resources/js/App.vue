@@ -1,5 +1,5 @@
 <template>
-    <div>
+    <div v-show="!isPluginPopup">
         <VideoBackground v-if="theme.backgroundType === 'video'" :src="theme.backgroundValue" />
 
         <!-- Auth gate: not logged in -->
@@ -294,6 +294,10 @@ import ProfilePopover        from './components/ProfilePopover.vue'
 import { createCentralEcho } from './centralEcho.js'
 
 const { get, post } = useApi()
+
+// True when this window was opened as a plugin popup (e.g. GM console, player window)
+const _qs = new URLSearchParams(window.location.search)
+const isPluginPopup = _qs.has('rpg_gm') || _qs.has('rpg_player')
 
 const centralUrl = ref('')
 
@@ -916,7 +920,7 @@ async function loadPlugins() {
             }
             return res.json()
         }
-        await bootstrapPlugins({ get, post, apiBase, upload })
+        await bootstrapPlugins({ get, post, apiBase, upload, authToken: localStorage.getItem('eluth_token') ?? '' })
     } catch { /* non-critical */ }
 }
 
@@ -1093,6 +1097,14 @@ onMounted(async () => {
                 jwtFeatures.value   = Array.isArray(payload.features) ? payload.features : []
                 authToken.value     = stored
                 authenticated.value = true
+
+                // Plugin popup short-circuit: skip full app init for GM/player windows
+                const _popupParams = new URLSearchParams(window.location.search)
+                if (_popupParams.has('rpg_gm') || _popupParams.has('rpg_player')) {
+                    await loadPlugins()
+                    return
+                }
+
                 centralEcho.value = createCentralEcho(stored, (newEcho) => { centralEcho.value = newEcho })
                 scheduleRefresh(payload.exp)
                 requestNotificationPermission()
