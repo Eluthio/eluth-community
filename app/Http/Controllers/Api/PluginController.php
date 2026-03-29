@@ -223,17 +223,21 @@ class PluginController extends Controller
 
         // Run plugin teardown (drops its tables) before files are removed
         $teardownFile = storage_path('app/public/plugins/' . $slug . '/backend/teardown.php');
+        \Log::info("Plugin uninstall [{$slug}]: teardown file " . (file_exists($teardownFile) ? 'FOUND' : 'NOT FOUND') . " at {$teardownFile}");
         if (file_exists($teardownFile)) {
             try {
                 require $teardownFile;
+                \Log::info("Plugin uninstall [{$slug}]: teardown ran OK");
             } catch (\Throwable $e) {
                 \Log::warning("Plugin teardown failed for [{$slug}]: " . $e->getMessage());
             }
         }
 
         // Remove migration tracking records
+        \Log::info("Plugin uninstall [{$slug}]: plugin_migrations exists=" . (Schema::hasTable('plugin_migrations') ? 'yes' : 'no'));
         if (Schema::hasTable('plugin_migrations')) {
-            \DB::table('plugin_migrations')->where('slug', $slug)->delete();
+            $deleted = \DB::table('plugin_migrations')->where('slug', $slug)->delete();
+            \Log::info("Plugin uninstall [{$slug}]: deleted {$deleted} plugin_migrations rows");
         }
 
         // Remove files
