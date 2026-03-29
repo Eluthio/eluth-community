@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Plugin;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 
 class PluginController extends Controller
 {
@@ -185,6 +186,12 @@ class PluginController extends Controller
         $zip->close();
         @unlink($tmpZip);
 
+        // Run any backend migrations the plugin ships
+        $migrationsDir = storage_path('app/public/plugins/' . $slug . '/backend/migrations');
+        if (is_dir($migrationsDir)) {
+            $this->runPluginMigrations($slug, $migrationsDir);
+        }
+
         // Upsert plugin record — preserve is_enabled on updates; default false for new installs
         $existing = Plugin::find($slug);
         $record = [
@@ -214,6 +221,19 @@ class PluginController extends Controller
             return response()->json(['message' => 'Plugin not found.'], 404);
         }
 
+        // Run plugin teardown (drops its tables) before files are removed
+        $teardownFile = storage_path('app/public/plugins/' . $slug . '/backend/teardown.php');
+        if (file_exists($teardownFile)) {
+            try {
+                require $teardownFile;
+            } catch (\Throwable $e) {
+                \Log::warning("Plugin teardown failed for [{$slug}]: " . $e->getMessage());
+            }
+        }
+
+        // Remove migration tracking records
+        \DB::table('plugin_migrations')->where('slug', $slug)->delete();
+
         // Remove files
         \Storage::disk('public')->deleteDirectory('plugins/' . $slug);
 
@@ -223,6 +243,48 @@ class PluginController extends Controller
         $plugin->delete();
 
         return response()->json(['ok' => true]);
+    }
+
+    // ── Plugin backend infrastructure ────────────────────────────────────────
+
+    /**
+     * Run any migration files from a plugin's backend/migrations/ directory
+     * that have not already been applied. Tracks applied migrations in the
+     * plugin_migrations table (created lazily on first use).
+     */
+    private function runPluginMigrations(string $slug, string $dir): void
+    {
+        // Create tracking table if it doesn't exist yet
+        if (! Schema::hasTable('plugin_migrations')) {
+            Schema::create('plugin_migrations', function ($table) {
+                $table->id();
+                $table->string('slug', 100);
+                $table->string('filename', 255);
+                $table->timestamp('ran_at')->useCurrent();
+                $table->unique(['slug', 'filename']);
+            });
+        }
+
+        $files = glob($dir . '/*.php');
+        if (! $files) return;
+        sort($files); // ensure numeric prefix ordering
+
+        foreach ($files as $file) {
+            $filename  = basename($file);
+            $alreadyRan = \DB::table('plugin_migrations')
+                ->where('slug', $slug)
+                ->where('filename', $filename)
+                ->exists();
+
+            if (! $alreadyRan) {
+                require $file;
+                \DB::table('plugin_migrations')->insert([
+                    'slug'     => $slug,
+                    'filename' => $filename,
+                    'ran_at'   => now(),
+                ]);
+            }
+        }
     }
 
     // ── GIF Picker proxy ─────────────────────────────────────────────────────
