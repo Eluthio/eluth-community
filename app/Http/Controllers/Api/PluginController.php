@@ -12,6 +12,7 @@ class PluginController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        file_put_contents(storage_path('uninstall_debug.txt'), date('H:i:s') . " index() called\n", FILE_APPEND);
         $plugins = Plugin::all()->map(function (Plugin $p) {
             $manifest = $p->manifest;
             if (isset($manifest['settings'])) {
