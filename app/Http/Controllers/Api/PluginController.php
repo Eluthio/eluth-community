@@ -223,6 +223,7 @@ class PluginController extends Controller
 
         // Run plugin teardown (drops its tables) before files are removed
         $teardownFile = storage_path('app/public/plugins/' . $slug . '/backend/teardown.php');
+        file_put_contents(storage_path('uninstall_debug.txt'), date('H:i:s') . " uninstall [{$slug}] called\n", FILE_APPEND);
         \Log::error("Plugin uninstall [{$slug}]: teardown file " . (file_exists($teardownFile) ? 'FOUND' : 'NOT FOUND') . " at {$teardownFile}");
         if (file_exists($teardownFile)) {
             try {
