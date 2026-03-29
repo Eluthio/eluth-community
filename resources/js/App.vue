@@ -81,6 +81,16 @@
                         title="Pending join requests"
                         @click="showJoinRequests = !showJoinRequests"
                     >{{ joinRequests.length }} pending</button>
+                    <component
+                        v-for="p in channelHeaderPlugins"
+                        :key="p.slug"
+                        :is="p.component"
+                        :settings="pluginSettings[p.slug] ?? {}"
+                        api-base="/api"
+                        :auth-token="authToken"
+                        :channel-id="activeChannelId"
+                        :current-member="currentMemberProxy"
+                    />
                     <button class="topbar-btn" :class="{ active: showMembers }" title="Toggle members" @click="showMembers = !showMembers">👥</button>
                     <button class="topbar-btn" :class="{ active: showDMs }" title="Direct Messages" @click="toggleDMs">
                         ✉<span v-if="dmUnread > 0" class="topbar-badge">{{ dmUnread > 9 ? '9+' : dmUnread }}</span>
@@ -278,7 +288,7 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { gsap } from 'gsap'
 import { createEcho } from './echo.js'
 import { loadClientConfig, getConfig } from './clientConfig.js'
-import { loadPlugin, bootstrapPlugins } from './plugins/registry.js'
+import { loadPlugin, bootstrapPlugins, getPlugin } from './plugins/registry.js'
 import { useApi, ApiError } from './composables/useApi.js'
 import VideoBackground from './components/VideoBackground.vue'
 import ChannelSidebar  from './components/ChannelSidebar.vue'
@@ -346,6 +356,13 @@ function dismissWelcome() {
 // ── Plugins ────────────────────────────────────────────────────────────────
 const enabledPlugins    = ref([])   // array of slugs
 const pluginSettings    = ref({})   // { slug: { key: value } }
+
+const channelHeaderPlugins = computed(() =>
+    enabledPlugins.value
+        .map(slug => ({ slug, plugin: getPlugin(slug) }))
+        .filter(({ plugin }) => plugin?.zones?.includes('channel-header') && plugin.component)
+        .map(({ slug, plugin }) => ({ slug, component: plugin.component }))
+)
 
 // ── Auth ───────────────────────────────────────────────────────────────────
 const authenticated = ref(false)
