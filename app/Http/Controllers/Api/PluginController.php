@@ -232,7 +232,9 @@ class PluginController extends Controller
         }
 
         // Remove migration tracking records
-        \DB::table('plugin_migrations')->where('slug', $slug)->delete();
+        if (Schema::hasTable('plugin_migrations')) {
+            \DB::table('plugin_migrations')->where('slug', $slug)->delete();
+        }
 
         // Remove files
         \Storage::disk('public')->deleteDirectory('plugins/' . $slug);
