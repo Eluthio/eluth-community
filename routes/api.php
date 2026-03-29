@@ -2,13 +2,10 @@
 
 use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\ChannelController;
-use App\Http\Controllers\Api\EmoteController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\MemberController;
 use App\Http\Controllers\Api\PluginController;
 use App\Http\Controllers\Api\StreamController;
-use App\Http\Controllers\Api\PollController;
-use App\Http\Controllers\Api\WatchPartyController;
 use App\Http\Controllers\Api\PluginRoomController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -174,11 +171,6 @@ Route::middleware('auth.central')->group(function () {
     Route::post('/admin/plugins/{slug}/disable',        [PluginController::class, 'disable']);
     Route::post('/admin/plugins/{slug}/settings',       [PluginController::class, 'updateSettings']);
 
-    // Emotes (emoticon plugin) — list is public, mutations require admin
-    Route::get('/plugins/emoticons/emotes', [EmoteController::class, 'index']);
-    Route::post('/admin/plugins/emoticons/emotes', [EmoteController::class, 'store']);
-    Route::delete('/admin/plugins/emoticons/emotes/{name}', [EmoteController::class, 'destroy']);
-
     // Image uploader plugin
     Route::post('/plugins/image-uploader/upload', [PluginController::class, 'imageUpload'])
         ->middleware('throttle:20,1');
@@ -187,27 +179,8 @@ Route::middleware('auth.central')->group(function () {
     Route::post('/plugins/model-viewer/upload', [PluginController::class, 'modelUpload'])
         ->middleware('throttle:10,1');
 
-    // Polls plugin
-    Route::get('/plugins/polls/active',          [PollController::class, 'active']);
-    Route::post('/plugins/polls',                [PollController::class, 'create'])->middleware('throttle:5,1');
-    Route::post('/plugins/polls/{id}/vote',      [PollController::class, 'vote']);
-    Route::post('/plugins/polls/{id}/close',     [PollController::class, 'close']);
-
     // File manager plugin
     Route::get('/plugins/file-manager/files', [PluginController::class, 'fileManagerFiles']);
-
-    // Watch party plugin
-    Route::get('/plugins/watch-party/proposals',                  [WatchPartyController::class, 'index']);
-    Route::post('/plugins/watch-party/proposals',                 [WatchPartyController::class, 'propose'])
-        ->middleware('throttle:10,1');
-    Route::post('/plugins/watch-party/proposals/{id}/vote',       [WatchPartyController::class, 'vote']);
-    Route::post('/plugins/watch-party/proposals/{id}/approve',    [WatchPartyController::class, 'approve']);
-    Route::delete('/plugins/watch-party/proposals/{id}/approve',  [WatchPartyController::class, 'reject']);
-    Route::delete('/plugins/watch-party/proposals/{id}',          [WatchPartyController::class, 'destroy']);
-    Route::delete('/plugins/watch-party/proposals',               [WatchPartyController::class, 'clear']);
-    Route::get('/plugins/watch-party/session/{channelId}',        [WatchPartyController::class, 'session']);
-    Route::post('/plugins/watch-party/session',                   [WatchPartyController::class, 'syncSession']);
-    Route::post('/plugins/watch-party/session/ready',             [WatchPartyController::class, 'sessionReady']);
 
     // Debug log — admin only, only when APP_DEBUG is true
     Route::get('/admin/debug-log', function (Request $request) {
