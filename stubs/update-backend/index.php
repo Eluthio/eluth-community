@@ -1298,17 +1298,6 @@ function pagePlugins(): void
 
     <?php endif; ?>
 
-    <!-- ── Install unofficial ────────────────────────────────────────────── -->
-    <div class="section-title" style="margin-top:32px;">Install unofficial plugin</div>
-    <p class="body-text">Paste a direct link to a GitHub release <code>.zip</code>. Unofficial plugins run in a sandboxed iframe and cannot access your data directly.</p>
-    <form method="POST">
-        <input type="hidden" name="act" value="install_plugin">
-        <div class="form-group">
-            <label class="label">GitHub release .zip URL</label>
-            <input class="input" type="url" name="url" placeholder="https://github.com/…/releases/download/v1.0.0/plugin.zip" style="max-width:540px;" required />
-        </div>
-        <button class="btn btn--ghost">Install</button>
-    </form>
     <?php
 }
 
