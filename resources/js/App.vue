@@ -1,4 +1,12 @@
 <template>
+    <ParticipantWindow
+        v-if="participantJoinParams && authenticated"
+        :room-id="participantJoinParams.roomId"
+        :auth-token="authToken"
+        :api-base="communityApiBase"
+        :current-member="currentMemberProxy"
+        @close="participantJoinParams = null"
+    />
     <div v-show="!isPluginPopup">
         <VideoBackground v-if="theme.backgroundType === 'video'" :src="theme.backgroundValue" />
 
@@ -290,8 +298,9 @@ import { createEcho } from './echo.js'
 import { loadClientConfig, getConfig } from './clientConfig.js'
 import { loadPlugin, bootstrapPlugins, getPlugin } from './plugins/registry.js'
 import { useApi, ApiError } from './composables/useApi.js'
-import VideoBackground from './components/VideoBackground.vue'
-import ChannelSidebar  from './components/ChannelSidebar.vue'
+import VideoBackground    from './components/VideoBackground.vue'
+import ParticipantWindow  from './components/ParticipantWindow.vue'
+import ChannelSidebar     from './components/ChannelSidebar.vue'
 import MessagePane     from './components/MessagePane.vue'
 import MemberSidebar   from './components/MemberSidebar.vue'
 import ServerSettings      from './components/ServerSettings.vue'
@@ -307,7 +316,10 @@ const { get, post } = useApi()
 
 // True when this window was opened as a plugin popup (e.g. GM console, player window)
 const _qs = new URLSearchParams(window.location.search)
-const isPluginPopup = _qs.has('rpg_gm') || _qs.has('rpg_player')
+const isPluginPopup = _qs.has('rpg_gm') || _qs.has('rpg_player') || _qs.has('participants_join')
+
+const participantJoinParams = ref(null)
+const communityApiBase      = window.location.origin + '/api'
 
 const centralUrl = ref('')
 
@@ -1115,9 +1127,14 @@ onMounted(async () => {
                 authToken.value     = stored
                 authenticated.value = true
 
-                // Plugin popup short-circuit: skip full app init for GM/player windows
+                // Plugin popup short-circuit: skip full app init for GM/player/participants windows
                 const _popupParams = new URLSearchParams(window.location.search)
-                if (_popupParams.has('rpg_gm') || _popupParams.has('rpg_player')) {
+                if (_popupParams.has('rpg_gm') || _popupParams.has('rpg_player') || _popupParams.has('participants_join')) {
+                    if (_popupParams.has('participants_join')) {
+                        participantJoinParams.value = {
+                            roomId: _popupParams.get('room_id') ?? '',
+                        }
+                    }
                     await loadPlugins()
                     return
                 }

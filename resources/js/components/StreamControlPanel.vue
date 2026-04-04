@@ -294,10 +294,10 @@
             </div>
         </div>
 
-        <!-- ── Plugin controls (loaded dynamically from plugin scripts) ── -->
-        <template v-for="(ctrl, key) in pluginControls" :key="key">
+        <!-- ── Plugin controls — only shown when source is in the active scene ── -->
+        <template v-for="(ctrl, key) in activePluginControls" :key="key">
             <div class="sc-divider" />
-            <component :is="ctrl" :state="pluginStates[key]" :send-command="sendCommand" />
+            <component :is="ctrl" :state="pluginStates[key]" :send-command="sendCommand" :channel-id="channelId" />
         </template>
 
         <!-- Footer -->
@@ -338,6 +338,14 @@ const pluginControls  = ref({})   // { sourceKey: VueComponent } — loaded dyna
 let   pluginSlugsLoaded = new Set()
 
 const activeScene   = computed(() => scenes.value.find(s => s.id === activeSceneId.value) ?? null)
+
+// Only show plugin controls when the corresponding source is in the active scene.
+const activePluginControls = computed(() => {
+    const sceneKeys = new Set(activeScene.value?.layers?.map(l => l.sourceKey) ?? [])
+    return Object.fromEntries(
+        Object.entries(pluginControls.value).filter(([key]) => sceneKeys.has(key))
+    )
+})
 const selectedLayerId = ref(null)
 const selectedLayer   = computed(() =>
     activeScene.value?.layers?.find(l => l.id === selectedLayerId.value) ?? null
