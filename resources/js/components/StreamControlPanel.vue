@@ -339,12 +339,11 @@ let   pluginSlugsLoaded = new Set()
 
 const activeScene   = computed(() => scenes.value.find(s => s.id === activeSceneId.value) ?? null)
 
-// Only show plugin controls when the corresponding source is in the active scene.
+// Only show plugin controls for the currently selected layer's source.
 const activePluginControls = computed(() => {
-    const sceneKeys = new Set(activeScene.value?.layers?.map(l => l.sourceKey) ?? [])
-    return Object.fromEntries(
-        Object.entries(pluginControls.value).filter(([key]) => sceneKeys.has(key))
-    )
+    const key = selectedLayer.value?.sourceKey
+    if (!key || !pluginControls.value[key]) return {}
+    return { [key]: pluginControls.value[key] }
 })
 const selectedLayerId = ref(null)
 const selectedLayer   = computed(() =>
