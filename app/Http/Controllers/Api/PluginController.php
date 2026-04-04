@@ -43,6 +43,12 @@ class PluginController extends Controller
         $plugin = Plugin::findOrFail($slug);
         $plugin->update(['is_enabled' => true]);
 
+        // Run any pending migrations now that the backend is becoming active
+        $migrationsDir = storage_path('app/public/plugins/' . $slug . '/backend/migrations');
+        if (is_dir($migrationsDir)) {
+            $this->runPluginMigrations($slug, $migrationsDir);
+        }
+
         return response()->json(['ok' => true]);
     }
 
@@ -192,8 +198,8 @@ class PluginController extends Controller
             $this->runPluginMigrations($slug, $migrationsDir);
         }
 
-        // Upsert plugin record — preserve is_enabled on updates;
-        // official plugins auto-enable on fresh install, others default to disabled.
+        // Upsert plugin record — preserve is_enabled on updates; default disabled for new installs.
+        // Migrations run on Enable, so Install alone does not activate backend routes.
         $existing = Plugin::find($slug);
         $record = [
             'name'       => $manifest['name'],
@@ -204,7 +210,7 @@ class PluginController extends Controller
         if ($existing) {
             $existing->update($record);
         } else {
-            Plugin::create(array_merge($record, ['slug' => $slug, 'is_enabled' => $tier === 'official']));
+            Plugin::create(array_merge($record, ['slug' => $slug, 'is_enabled' => false]));
         }
 
         return response()->json(['ok' => true, 'slug' => $slug, 'name' => $manifest['name']]);
