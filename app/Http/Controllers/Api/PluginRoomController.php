@@ -31,7 +31,7 @@ class PluginRoomController extends Controller
 
         // Enforce one active room per plugin+channel
         if ($this->findActive($slug, $data['channel_id'])) {
-            return response()->json(['message' => 'A game is already in progress in this channel.'], 409);
+            return response()->json(['message' => 'A session is already in progress in this channel.', 'room' => $this->findActive($slug, $data['channel_id'])], 409);
         }
 
         $seats = $data['max_players'] ?? 2;
