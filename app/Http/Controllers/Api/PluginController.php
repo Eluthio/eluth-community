@@ -192,13 +192,6 @@ class PluginController extends Controller
         $zip->close();
         @unlink($tmpZip);
 
-        // Clear migration tracking so every install/update re-runs all migration files.
-        // hasTable guards inside each file make re-running safe — existing tables are skipped,
-        // new tables (added in updates) get created.
-        if (\Schema::hasTable('plugin_migrations')) {
-            \DB::table('plugin_migrations')->where('slug', $slug)->delete();
-        }
-
         // Run any backend migrations the plugin ships
         $migrationsDir = storage_path('app/public/plugins/' . $slug . '/backend/migrations');
         if (is_dir($migrationsDir)) {
@@ -268,6 +261,25 @@ class PluginController extends Controller
      * that have not already been applied. Tracks applied migrations in the
      * plugin_migrations table (created lazily on first use).
      */
+    /**
+     * Run migration files from a plugin's backend/migrations/ directory that have
+     * not already been applied. Files are sorted alphabetically (use a numeric prefix
+     * like 001_, 002_ to guarantee order).
+     *
+     * Each migration file receives the full Laravel DB/Schema API. Use guards so
+     * every operation is idempotent:
+     *
+     *   CREATE TABLE  → if (! Schema::hasTable('x'))   { Schema::create(...) }
+     *   ADD COLUMN    → if (! Schema::hasColumn('t','c')) { Schema::table(...add...) }
+     *   DROP COLUMN   → if (Schema::hasColumn('t','c'))  { Schema::table(...drop...) }
+     *   DROP TABLE    → if (Schema::hasTable('x'))       { Schema::dropIfExists('x') }
+     *   INSERT/UPDATE → wrap in try/catch or check before inserting
+     *
+     * A file is only marked as run after it completes without exception. A failed
+     * migration has no tracking record and will be retried on the next install/update.
+     * A user on v1 who skips v2 and installs v3 will have v2's migrations run first,
+     * then v3's — all untracked files execute in filename order.
+     */
     private function runPluginMigrations(string $slug, string $dir): void
     {
         // Create tracking table if it doesn't exist yet
@@ -283,17 +295,17 @@ class PluginController extends Controller
 
         $files = glob($dir . '/*.php');
         if (! $files) return;
-        sort($files); // ensure numeric prefix ordering
+        sort($files); // numeric prefix ordering: 001_, 002_, …
 
         foreach ($files as $file) {
-            $filename  = basename($file);
+            $filename   = basename($file);
             $alreadyRan = \DB::table('plugin_migrations')
                 ->where('slug', $slug)
                 ->where('filename', $filename)
                 ->exists();
 
             if (! $alreadyRan) {
-                require $file;
+                require $file; // throws on failure — no tracking record written, retried next time
                 \DB::table('plugin_migrations')->insert([
                     'slug'     => $slug,
                     'filename' => $filename,
