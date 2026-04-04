@@ -43,10 +43,27 @@ class PluginController extends Controller
         $plugin = Plugin::findOrFail($slug);
         $plugin->update(['is_enabled' => true]);
 
-        // Run any pending migrations now that the backend is becoming active
+        // Clear tracking records before re-running migrations.
+        // Migration files must be idempotent (Schema::hasTable/hasColumn guards),
+        // so re-running is safe and cheap. Clearing first means that if tables were
+        // manually dropped or tracking records are stale, a disable → re-enable always
+        // fixes the installation without needing SSH access.
+        if (Schema::hasTable('plugin_migrations')) {
+            \DB::table('plugin_migrations')->where('slug', $slug)->delete();
+        }
+
         $migrationsDir = storage_path('app/public/plugins/' . $slug . '/backend/migrations');
         if (is_dir($migrationsDir)) {
-            $this->runPluginMigrations($slug, $migrationsDir);
+            try {
+                $this->runPluginMigrations($slug, $migrationsDir);
+            } catch (\Throwable $e) {
+                \Log::error("[Plugin:{$slug}] Migration failed during enable: " . $e->getMessage(), [
+                    'file' => $e->getFile(), 'line' => $e->getLine(),
+                ]);
+                return response()->json([
+                    'message' => "Plugin enabled but migration failed: " . $e->getMessage(),
+                ], 500);
+            }
         }
 
         return response()->json(['ok' => true]);
