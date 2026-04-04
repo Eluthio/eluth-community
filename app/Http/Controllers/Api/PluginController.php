@@ -192,6 +192,13 @@ class PluginController extends Controller
         $zip->close();
         @unlink($tmpZip);
 
+        // Clear migration tracking so every install/update re-runs all migration files.
+        // hasTable guards inside each file make re-running safe — existing tables are skipped,
+        // new tables (added in updates) get created.
+        if (\Schema::hasTable('plugin_migrations')) {
+            \DB::table('plugin_migrations')->where('slug', $slug)->delete();
+        }
+
         // Run any backend migrations the plugin ships
         $migrationsDir = storage_path('app/public/plugins/' . $slug . '/backend/migrations');
         if (is_dir($migrationsDir)) {
