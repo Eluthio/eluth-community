@@ -195,7 +195,19 @@ class PluginController extends Controller
         // Run any backend migrations the plugin ships
         $migrationsDir = storage_path('app/public/plugins/' . $slug . '/backend/migrations');
         if (is_dir($migrationsDir)) {
-            $this->runPluginMigrations($slug, $migrationsDir);
+            try {
+                $this->runPluginMigrations($slug, $migrationsDir);
+            } catch (\Throwable $e) {
+                \Log::error("[Plugin:{$slug}] Migration failed during install: " . $e->getMessage(), [
+                    'file'  => $e->getFile(),
+                    'line'  => $e->getLine(),
+                ]);
+                // Clean up extracted files so a retry starts fresh
+                \Storage::disk('public')->deleteDirectory('plugins/' . $slug);
+                return response()->json([
+                    'message' => "Plugin installed but migration failed: " . $e->getMessage() . " — files have been removed, please try again.",
+                ], 500);
+            }
         }
 
         // Upsert plugin record — preserve is_enabled on updates; default disabled for new installs.
@@ -228,19 +240,26 @@ class PluginController extends Controller
             return response()->json(['message' => 'Plugin not found.'], 404);
         }
 
-        // Run plugin teardown (drops its tables) before files are removed
-        $teardownFile = storage_path('app/public/plugins/' . $slug . '/backend/teardown.php');
-        if (file_exists($teardownFile)) {
-            try {
-                require $teardownFile;
-            } catch (\Throwable $e) {
-                // teardown failure is non-fatal — files are removed regardless
-            }
-        }
+        // keep_data=true → preserve tables and migration tracking so a reinstall
+        // picks up exactly where it left off (only runs migrations added since).
+        // keep_data=false (default) → full teardown: drop tables, clear tracking.
+        $keepData = filter_var($request->input('keep_data', false), FILTER_VALIDATE_BOOLEAN);
 
-        // Remove migration tracking records
-        if (Schema::hasTable('plugin_migrations')) {
-            \DB::table('plugin_migrations')->where('slug', $slug)->delete();
+        if (! $keepData) {
+            // Run plugin teardown (drops its tables) before files are removed
+            $teardownFile = storage_path('app/public/plugins/' . $slug . '/backend/teardown.php');
+            if (file_exists($teardownFile)) {
+                try {
+                    require $teardownFile;
+                } catch (\Throwable $e) {
+                    // teardown failure is non-fatal — files are removed regardless
+                }
+            }
+
+            // Remove migration tracking records
+            if (Schema::hasTable('plugin_migrations')) {
+                \DB::table('plugin_migrations')->where('slug', $slug)->delete();
+            }
         }
 
         // Remove files

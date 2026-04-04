@@ -205,32 +205,20 @@
                     </div>
 
                     <div v-if="pluginsLoading" class="settings-hint">Loading plugins…</div>
-                    <div v-else-if="pluginsList.length === 0" class="settings-hint">No plugins available.</div>
-                    <div v-else class="settings-plugin-list">
-                        <div v-for="plugin in pluginsList" :key="plugin.slug" class="settings-plugin-row">
-                            <div class="settings-plugin-header">
-                                <div class="settings-plugin-info">
+                    <div v-else-if="pluginsList.length === 0" class="settings-hint">No plugins installed.</div>
+                    <div v-else class="settings-plugin-grid">
+                        <div v-for="plugin in pluginsList" :key="plugin.slug" class="settings-plugin-card" :class="{ 'plugin-enabled': plugin.is_enabled }">
+                            <div class="settings-plugin-card-top">
+                                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                                     <span class="settings-plugin-name">{{ plugin.name }}</span>
                                     <span class="settings-plugin-tier" :class="'tier-' + plugin.tier">{{ plugin.tier }}</span>
-                                    <span v-if="plugin.manifest?.description" class="settings-plugin-desc">{{ plugin.manifest.description }}</span>
                                 </div>
-                                <div class="settings-plugin-toggle">
-                                    <button
-                                        class="settings-btn-primary"
-                                        v-if="!plugin.is_enabled"
-                                        @click="enablePlugin(plugin)"
-                                    >Enable</button>
-                                    <button
-                                        class="settings-btn-ghost settings-btn-danger"
-                                        v-else
-                                        @click="disablePlugin(plugin)"
-                                    >Disable</button>
-                                </div>
+                                <p v-if="plugin.manifest?.description" class="settings-plugin-desc">{{ plugin.manifest.description }}</p>
                             </div>
 
                             <!-- Settings fields shown when plugin is enabled and has settings -->
                             <div v-if="plugin.is_enabled && plugin.manifest?.settings?.length" class="settings-plugin-settings">
-                                <div v-for="setting in plugin.manifest.settings" :key="setting.key" class="settings-section" style="margin-bottom:12px;">
+                                <div v-for="setting in plugin.manifest.settings" :key="setting.key" style="margin-bottom:12px;">
                                     <label class="settings-label">{{ setting.label }}</label>
                                     <input
                                         class="settings-input"
@@ -245,6 +233,23 @@
                                     :disabled="savingPluginSettings[plugin.slug]"
                                 >{{ savingPluginSettings[plugin.slug] ? 'Saving…' : 'Save settings' }}</button>
                                 <span v-if="savedPluginSettings[plugin.slug]" class="settings-saved" style="margin-left:8px;">Saved.</span>
+                            </div>
+
+                            <div class="settings-plugin-card-footer">
+                                <button
+                                    class="settings-btn-primary"
+                                    v-if="!plugin.is_enabled"
+                                    @click="enablePlugin(plugin)"
+                                >Enable</button>
+                                <button
+                                    class="settings-btn-ghost"
+                                    v-else
+                                    @click="disablePlugin(plugin)"
+                                >Disable</button>
+                                <button
+                                    class="settings-btn-ghost settings-btn-danger"
+                                    @click="uninstallPlugin(plugin)"
+                                >Uninstall</button>
                             </div>
                         </div>
                     </div>
@@ -554,6 +559,25 @@
 
             <!-- Close button -->
             <button class="settings-close" @click="$emit('close')" title="Close (Esc)">✕</button>
+        </div>
+
+        <!-- Uninstall confirmation modal -->
+        <div v-if="uninstallTarget" class="settings-role-assign-overlay" @click.self="uninstallTarget = null">
+            <div class="settings-role-assign-panel">
+                <div class="settings-panel-title" style="margin-bottom:12px;">Uninstall "{{ uninstallTarget.name }}"?</div>
+                <p class="settings-hint" style="margin-bottom:16px;">This will remove the plugin files and settings. This action cannot be undone.</p>
+                <label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:20px;cursor:pointer;">
+                    <input type="checkbox" v-model="uninstallKeepData" style="margin-top:2px;flex-shrink:0;" />
+                    <span class="settings-hint" style="margin:0;">Keep plugin data (database tables and records). Use this if you plan to reinstall the same plugin and want to preserve existing data.</span>
+                </label>
+                <div style="display:flex;gap:8px;">
+                    <button class="settings-btn-ghost settings-btn-danger" @click="confirmUninstall" :disabled="uninstalling">
+                        {{ uninstalling ? 'Uninstalling…' : 'Uninstall' }}
+                    </button>
+                    <button class="settings-btn-ghost" @click="uninstallTarget = null" :disabled="uninstalling">Cancel</button>
+                </div>
+                <div v-if="uninstallError" class="settings-error" style="margin-top:10px;">{{ uninstallError }}</div>
+            </div>
         </div>
     </div>
 </template>
@@ -1087,13 +1111,31 @@ async function installPlugin() {
     }
 }
 
-async function uninstallPlugin(plugin) {
-    if (! confirm(`Uninstall "${plugin.name}"? This cannot be undone.`)) return
+const uninstallTarget   = ref(null)
+const uninstallKeepData = ref(false)
+const uninstalling      = ref(false)
+const uninstallError    = ref('')
+
+function uninstallPlugin(plugin) {
+    uninstallTarget.value   = plugin
+    uninstallKeepData.value = false
+    uninstallError.value    = ''
+}
+
+async function confirmUninstall() {
+    if (! uninstallTarget.value) return
+    uninstalling.value   = true
+    uninstallError.value = ''
     try {
-        await post('/admin/plugins/' + plugin.slug + '/uninstall', {})
+        await post('/admin/plugins/' + uninstallTarget.value.slug + '/uninstall', {
+            keep_data: uninstallKeepData.value,
+        })
+        uninstallTarget.value = null
         await loadPlugins()
     } catch (e) {
-        alert('Uninstall failed: ' + (e.message ?? 'Unknown error'))
+        uninstallError.value = e.message ?? 'Uninstall failed.'
+    } finally {
+        uninstalling.value = false
     }
 }
 
@@ -1183,32 +1225,38 @@ function formatDate(iso) {
 </script>
 
 <style scoped>
-.settings-plugin-list {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
-.settings-plugin-row {
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 8px;
-    padding: 16px;
-}
-
-.settings-plugin-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
+.settings-plugin-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 12px;
 }
 
-.settings-plugin-info {
+.settings-plugin-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 10px;
+    padding: 14px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 10px;
+    transition: border-color 0.15s;
+}
+.settings-plugin-card.plugin-enabled {
+    border-color: rgba(88,101,242,0.35);
+}
+
+.settings-plugin-card-top {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
     flex: 1;
-    min-width: 0;
+}
+
+.settings-plugin-card-footer {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: auto;
 }
 
 .settings-plugin-name {
@@ -1225,24 +1273,20 @@ function formatDate(iso) {
     letter-spacing: 0.05em;
     padding: 1px 6px;
     border-radius: 3px;
-    width: fit-content;
+    white-space: nowrap;
 }
-.tier-official  { background: rgba(88,101,242,0.2); color: #818cf8; }
-.tier-approved  { background: rgba(34,197,94,0.15); color: #4ade80; }
-.tier-unofficial { background: rgba(234,179,8,0.15); color: #facc15; }
+.tier-official   { background: rgba(88,101,242,0.2);  color: #818cf8; }
+.tier-approved   { background: rgba(34,197,94,0.15);  color: #4ade80; }
+.tier-unofficial { background: rgba(234,179,8,0.15);  color: #facc15; }
 
 .settings-plugin-desc {
     font-size: 12px;
     color: rgba(255,255,255,0.45);
-}
-
-.settings-plugin-toggle {
-    flex-shrink: 0;
+    margin: 0;
 }
 
 .settings-plugin-settings {
-    margin-top: 14px;
-    padding-top: 14px;
+    padding-top: 10px;
     border-top: 1px solid rgba(255,255,255,0.06);
 }
 

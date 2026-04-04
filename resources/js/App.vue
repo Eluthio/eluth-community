@@ -425,23 +425,9 @@ function scheduleRefresh(expUnix) {
 }
 
 async function tryRefresh() {
-    try {
-        const res = await fetch(centralUrl.value + '/api/auth/refresh', {
-            method: 'POST', credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-        })
-        if (!res.ok) throw new Error('refresh failed')
-        const data = await res.json()
-        if (data.token) {
-            const payload = JSON.parse(atob(data.token.split('.')[1]))
-            localStorage.setItem('eluth_token', data.token)
-            authToken.value = data.token
-            scheduleRefresh(payload.exp)
-        }
-    } catch {
-        // Fall back to silent OAuth check
-        startSilentCheck()
-    }
+    // Central uses short-lived JWTs refreshed via silent OAuth (no dedicated refresh endpoint).
+    // Attempt a silent re-auth so the user doesn't notice the token renewal.
+    startSilentCheck()
 }
 
 async function handleTokenReceived(token) {
@@ -485,7 +471,11 @@ function startSilentCheck() {
 
     const timer = setTimeout(() => {
         cleanup()
-        authState.value = 'unauthenticated'
+        // Clear all auth state — show the login screen rather than a blank broken app
+        authenticated.value = false
+        authToken.value     = ''
+        localStorage.removeItem('eluth_token')
+        authState.value     = 'unauthenticated'
     }, 8000)
 
     const onMessage = async (event) => {
