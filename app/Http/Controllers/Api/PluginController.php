@@ -192,7 +192,8 @@ class PluginController extends Controller
             $this->runPluginMigrations($slug, $migrationsDir);
         }
 
-        // Upsert plugin record — preserve is_enabled on updates; default false for new installs
+        // Upsert plugin record — preserve is_enabled on updates;
+        // official plugins auto-enable on fresh install, others default to disabled.
         $existing = Plugin::find($slug);
         $record = [
             'name'       => $manifest['name'],
@@ -203,7 +204,7 @@ class PluginController extends Controller
         if ($existing) {
             $existing->update($record);
         } else {
-            Plugin::create(array_merge($record, ['slug' => $slug, 'is_enabled' => false]));
+            Plugin::create(array_merge($record, ['slug' => $slug, 'is_enabled' => $tier === 'official']));
         }
 
         return response()->json(['ok' => true, 'slug' => $slug, 'name' => $manifest['name']]);
