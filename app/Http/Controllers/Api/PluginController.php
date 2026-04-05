@@ -40,6 +40,8 @@ class PluginController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
+        \Log::info("[Plugin:{$slug}] E00 Enable started");
+
         $plugin = Plugin::findOrFail($slug);
         $plugin->update(['is_enabled' => true]);
 
@@ -50,6 +52,7 @@ class PluginController extends Controller
         // fixes the installation without needing SSH access.
         if (Schema::hasTable('plugin_migrations')) {
             \DB::table('plugin_migrations')->where('slug', $slug)->delete();
+            \Log::info("[Plugin:{$slug}] Cleared migration tracking records — will re-run all migrations");
         }
 
         $migrationsDir = storage_path('app/public/plugins/' . $slug . '/backend/migrations');
@@ -57,15 +60,27 @@ class PluginController extends Controller
             try {
                 $this->runPluginMigrations($slug, $migrationsDir);
             } catch (\Throwable $e) {
-                \Log::error("[Plugin:{$slug}] Migration failed during enable: " . $e->getMessage(), [
+                \Log::error("[Plugin:{$slug}] E01-DBE Migration failed: " . $e->getMessage(), [
                     'file' => $e->getFile(), 'line' => $e->getLine(),
                 ]);
                 return response()->json([
-                    'message' => "Plugin enabled but migration failed: " . $e->getMessage(),
+                    'message' => "[E01-DBE] Enable failed — migration error: " . $e->getMessage(),
                 ], 500);
             }
         }
 
+        \Log::info("[Plugin:{$slug}] E02 Running post-enable verification");
+        $manifest = $plugin->fresh()->manifest ?? [];
+        $issues   = $this->verifyPlugin($slug, $manifest);
+        if ($issues) {
+            $detail = implode('; ', $issues);
+            \Log::error("[Plugin:{$slug}] E02-VRF Post-enable verification failed: {$detail}");
+            return response()->json([
+                'message' => "[E02-VRF] Enable failed — {$detail}",
+            ], 500);
+        }
+
+        \Log::info("[Plugin:{$slug}] E00 Enabled successfully");
         return response()->json(['ok' => true]);
     }
 
@@ -79,6 +94,7 @@ class PluginController extends Controller
         $plugin = Plugin::findOrFail($slug);
         $plugin->update(['is_enabled' => false]);
 
+        \Log::info("[Plugin:{$slug}] Disabled");
         return response()->json(['ok' => true]);
     }
 
@@ -117,16 +133,21 @@ class PluginController extends Controller
             return response()->json(['message' => 'Invalid URL.'], 422);
         }
 
+        \Log::info("[Plugin:?] I00 Install started", ['url' => $url]);
+
         // Download the zip
         $tmpZip = tempnam(sys_get_temp_dir(), 'eluth_plugin_') . '.zip';
         try {
             $response = \Http::timeout(30)->get($url);
             if (! $response->ok()) {
-                return response()->json(['message' => 'Could not download plugin zip.'], 422);
+                \Log::error("[Plugin:?] I01-HTTP Download failed — HTTP {$response->status()}", ['url' => $url]);
+                return response()->json(['message' => '[I01-HTTP] Could not download plugin zip.'], 422);
             }
             file_put_contents($tmpZip, $response->body());
+            \Log::info("[Plugin:?] I01 Downloaded zip (" . strlen($response->body()) . " bytes)");
         } catch (\Throwable $e) {
-            return response()->json(['message' => 'Download failed: ' . $e->getMessage()], 422);
+            \Log::error("[Plugin:?] I01-NET Download exception: " . $e->getMessage());
+            return response()->json(['message' => '[I01-NET] Download failed: ' . $e->getMessage()], 422);
         }
 
         // Extract and validate plugin.json
@@ -158,6 +179,8 @@ class PluginController extends Controller
 
         $slug = preg_replace('/[^a-z0-9\-]/', '', strtolower($manifest['slug']));
         $tier = $manifest['tier'];
+
+        \Log::info("[Plugin:{$slug}] I02 zip validated — installing v{$manifest['version']} (tier: {$tier})");
 
         if (! in_array($tier, ['official', 'approved', 'unofficial'])) {
             $zip->close(); @unlink($tmpZip);
@@ -208,27 +231,29 @@ class PluginController extends Controller
         }
         $zip->close();
         @unlink($tmpZip);
+        \Log::info("[Plugin:{$slug}] I03 Files extracted to storage/app/public/plugins/{$slug}");
 
         // Run any backend migrations the plugin ships
         $migrationsDir = storage_path('app/public/plugins/' . $slug . '/backend/migrations');
         if (is_dir($migrationsDir)) {
+            \Log::info("[Plugin:{$slug}] I04 Running migrations");
             try {
                 $this->runPluginMigrations($slug, $migrationsDir);
+                \Log::info("[Plugin:{$slug}] I04 Migrations complete");
             } catch (\Throwable $e) {
-                \Log::error("[Plugin:{$slug}] Migration failed during install: " . $e->getMessage(), [
+                \Log::error("[Plugin:{$slug}] I04-DBE Migration failed: " . $e->getMessage(), [
                     'file'  => $e->getFile(),
                     'line'  => $e->getLine(),
                 ]);
                 // Clean up extracted files so a retry starts fresh
                 \Storage::disk('public')->deleteDirectory('plugins/' . $slug);
                 return response()->json([
-                    'message' => "Plugin installed but migration failed: " . $e->getMessage() . " — files have been removed, please try again.",
+                    'message' => "[I04-DBE] Install failed — migration error: " . $e->getMessage() . " — files removed, please try again.",
                 ], 500);
             }
         }
 
         // Upsert plugin record — preserve is_enabled on updates; default disabled for new installs.
-        // Migrations run on Enable, so Install alone does not activate backend routes.
         $existing = Plugin::find($slug);
         $record = [
             'name'       => $manifest['name'],
@@ -242,6 +267,22 @@ class PluginController extends Controller
             Plugin::create(array_merge($record, ['slug' => $slug, 'is_enabled' => false]));
         }
 
+        // Post-install verification — checks entry file, backend files, and any
+        // tables/columns declared in plugin.json under "requires".
+        \Log::info("[Plugin:{$slug}] I05 Running post-install verification");
+        $issues = $this->verifyPlugin($slug, $manifest);
+        if ($issues) {
+            $detail = implode('; ', $issues);
+            \Log::error("[Plugin:{$slug}] I05-VRF Post-install verification failed: {$detail}");
+            // Files and DB record stay — admin can see what's missing and retry enable
+            return response()->json([
+                'message' => "[I05-VRF] Plugin installed but verification failed — {$detail}",
+                'slug'    => $slug,
+                'name'    => $manifest['name'],
+            ], 500);
+        }
+
+        \Log::info("[Plugin:{$slug}] I00 Install complete (v{$manifest['version']})");
         return response()->json(['ok' => true, 'slug' => $slug, 'name' => $manifest['name']]);
     }
 
@@ -261,6 +302,7 @@ class PluginController extends Controller
         // picks up exactly where it left off (only runs migrations added since).
         // keep_data=false (default) → full teardown: drop tables, clear tracking.
         $keepData = filter_var($request->input('keep_data', false), FILTER_VALIDATE_BOOLEAN);
+        \Log::info("[Plugin:{$slug}] Uninstall started", ['keep_data' => $keepData]);
 
         if (! $keepData) {
             // Run plugin teardown (drops its tables) before files are removed
@@ -268,25 +310,30 @@ class PluginController extends Controller
             if (file_exists($teardownFile)) {
                 try {
                     require $teardownFile;
+                    \Log::info("[Plugin:{$slug}] U01 Teardown complete");
                 } catch (\Throwable $e) {
                     // teardown failure is non-fatal — files are removed regardless
+                    \Log::error("[Plugin:{$slug}] U01-DBE Teardown failed (non-fatal): " . $e->getMessage());
                 }
             }
 
             // Remove migration tracking records
             if (Schema::hasTable('plugin_migrations')) {
                 \DB::table('plugin_migrations')->where('slug', $slug)->delete();
+                \Log::info("[Plugin:{$slug}] U02 Migration tracking records removed");
             }
         }
 
         // Remove files
         \Storage::disk('public')->deleteDirectory('plugins/' . $slug);
+        \Log::info("[Plugin:{$slug}] U03 Plugin files removed");
 
         // Remove settings
         \DB::table('server_settings')->where('key', 'like', 'plugin_' . $slug . '_%')->delete();
 
         $plugin->delete();
 
+        \Log::info("[Plugin:{$slug}] Uninstall complete");
         return response()->json(['ok' => true]);
     }
 
@@ -341,14 +388,68 @@ class PluginController extends Controller
                 ->exists();
 
             if (! $alreadyRan) {
+                \Log::info("[Plugin:{$slug}] Running migration: {$filename}");
                 require $file; // throws on failure — no tracking record written, retried next time
                 \DB::table('plugin_migrations')->insert([
                     'slug'     => $slug,
                     'filename' => $filename,
                     'ran_at'   => now(),
                 ]);
+                \Log::info("[Plugin:{$slug}] Migration complete: {$filename}");
+            } else {
+                \Log::info("[Plugin:{$slug}] Migration already ran (skipped): {$filename}");
             }
         }
+    }
+
+    /**
+     * Verify a plugin's installation is complete.
+     *
+     * Checks:
+     *  1. Entry JS file exists
+     *  2. backend/routes.php and backend/controller.php exist (if backend dir present)
+     *  3. Any tables listed in manifest["requires"]["tables"] exist in the DB
+     *  4. Any columns listed in manifest["requires"]["columns"][table] exist
+     *
+     * Returns an array of problem strings. Empty = all checks passed.
+     */
+    private function verifyPlugin(string $slug, array $manifest): array
+    {
+        $issues    = [];
+        $pluginDir = storage_path('app/public/plugins/' . $slug);
+
+        // 1. Entry file
+        $entry = $manifest['entry'] ?? '';
+        if ($entry && ! file_exists($pluginDir . '/' . $entry)) {
+            $issues[] = "entry file missing: {$entry}";
+        }
+
+        // 2. Backend files
+        if (is_dir($pluginDir . '/backend')) {
+            foreach (['routes.php', 'controller.php'] as $file) {
+                if (! file_exists($pluginDir . '/backend/' . $file)) {
+                    $issues[] = "backend file missing: backend/{$file}";
+                }
+            }
+        }
+
+        // 3. Required tables
+        foreach ($manifest['requires']['tables'] ?? [] as $table) {
+            if (! Schema::hasTable($table)) {
+                $issues[] = "required table missing: {$table}";
+            }
+        }
+
+        // 4. Required columns
+        foreach ($manifest['requires']['columns'] ?? [] as $table => $columns) {
+            foreach ((array) $columns as $column) {
+                if (! Schema::hasColumn($table, $column)) {
+                    $issues[] = "required column missing: {$table}.{$column}";
+                }
+            }
+        }
+
+        return $issues;
     }
 
     // ── GIF Picker proxy ─────────────────────────────────────────────────────
