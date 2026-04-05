@@ -460,7 +460,7 @@ function openProfilePopover({ username, anchorX, anchorY }) {
     profilePopover.value = { visible: true, username, anchorX, anchorY }
 }
 
-function startSilentCheck() {
+function startSilentCheck(_attempt = 1) {
     const state   = randomState()
     const iframe  = document.createElement('iframe')
     iframe.src    = buildAuthorizeUrl(state, 'none')
@@ -471,11 +471,17 @@ function startSilentCheck() {
 
     const timer = setTimeout(() => {
         cleanup()
-        // Clear all auth state — show the login screen rather than a blank broken app
-        authenticated.value = false
-        authToken.value     = ''
-        localStorage.removeItem('eluth_token')
-        authState.value     = 'unauthenticated'
+        window.removeEventListener('message', onMessage)
+        if (_attempt < 2) {
+            // One retry before giving up — handles a brief central server blip
+            setTimeout(() => startSilentCheck(2), 3000)
+        } else {
+            // Both attempts timed out — clear auth and show the login screen
+            authenticated.value = false
+            authToken.value     = ''
+            localStorage.removeItem('eluth_token')
+            authState.value     = 'unauthenticated'
+        }
     }, 8000)
 
     const onMessage = async (event) => {
