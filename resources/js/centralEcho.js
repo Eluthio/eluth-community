@@ -3,9 +3,6 @@ import Pusher from 'pusher-js'
 import { getConfig } from './clientConfig.js'
 
 // Two ws-bridge paths — proxy /app2/* to a second ws-bridge instance on port 3001.
-// On 'unavailable' we recreate Echo on the alternate path so the client reconnects
-// via the other bridge while the dead one is restarted by cron (within ~30s).
-//
 // Pusher constructs the full WS path as: {wsPath}/app/{key}
 // So wsPath='' → /app/{key}  (primary, default)
 //    wsPath='/app2' → /app2/app/{key} (fallback, routed by .htaccess to port 3001)
@@ -40,23 +37,44 @@ export function createCentralEcho(token, onReplace = null, _pathIdx = 0) {
     })
 
     // ── Reconnection resilience ──────────────────────────────────────────────
-    // Pusher enters "unavailable" and stops retrying when the server is down.
-    // If a caller provided onReplace, failover to the alternate ws-bridge path
-    // so one instance dying doesn't require a page refresh.
-    // Without onReplace (e.g. direct usage), just keep retrying the same path.
+    // Don't wait for Pusher's "unavailable" (~30s of retries). Instead watch for
+    // the first drop (connected → connecting) and failover after a 2s grace period
+    // — long enough to ride out a brief network blip, short enough to feel instant.
     const pusher = echo.connector.pusher
-    pusher.connection.bind('unavailable', () => {
-        setTimeout(() => {
-            if (onReplace) {
-                echo.disconnect()
-                const nextIdx = (_pathIdx + 1) % WS_PATHS.length
-                const newEcho = createCentralEcho(token, onReplace, nextIdx)
-                onReplace(newEcho)
-            } else {
-                pusher.connect()
+
+    function doFailover() {
+        echo.disconnect()
+        const nextIdx = (_pathIdx + 1) % WS_PATHS.length
+        const newEcho = createCentralEcho(token, onReplace, nextIdx)
+        onReplace(newEcho)
+    }
+
+    if (onReplace) {
+        let _failoverTimer = null
+
+        pusher.connection.bind('state_change', ({ current, previous }) => {
+            if (previous === 'connected' && current === 'connecting') {
+                // Connection just dropped — give it 2s to self-recover before switching
+                _failoverTimer = setTimeout(() => {
+                    if (pusher.connection.state !== 'connected') doFailover()
+                }, 2000)
+            } else if (current === 'connected') {
+                // Recovered on its own — cancel any pending failover
+                clearTimeout(_failoverTimer)
+                _failoverTimer = null
             }
-        }, 5000)
-    })
+        })
+
+        // Pusher gave up entirely without ever connecting (e.g. initial path dead)
+        pusher.connection.bind('unavailable', () => {
+            clearTimeout(_failoverTimer)
+            doFailover()
+        })
+    } else {
+        pusher.connection.bind('unavailable', () => {
+            setTimeout(() => pusher.connect(), 5000)
+        })
+    }
 
     return echo
 }
