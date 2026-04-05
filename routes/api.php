@@ -10,6 +10,10 @@ use App\Http\Controllers\Api\PluginRoomController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
+// Public: popup registry — built from all enabled plugin manifests.
+// Used by the frontend to detect popup URLs before mounting the SPA.
+Route::get('/popup-registry', [PluginController::class, 'popupRegistry']);
+
 // Public: runtime config for the frontend (replaces baked-in VITE_ env vars)
 Route::get('/client-config', function () {
     return response()->json([

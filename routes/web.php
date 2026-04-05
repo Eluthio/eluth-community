@@ -7,7 +7,10 @@ Route::get('/3d-viewer', function () {
     return view('viewer-3d');
 });
 
-// Serve the Vue SPA for all non-API web routes — Vue Router handles the rest
+// Serve the Vue SPA for all non-API web routes — Vue Router handles the rest.
+// The popup registry is built from installed plugin manifests and inlined into the
+// page so app.js can detect popup URLs synchronously before mounting anything.
 Route::get('/{any?}', function () {
-    return view('app');
+    $popupRegistry = \App\Models\Plugin::buildPopupRegistry();
+    return view('app', ['popupRegistry' => $popupRegistry]);
 })->where('any', '^(?!api/).*');

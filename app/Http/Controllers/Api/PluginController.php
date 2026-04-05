@@ -16,6 +16,16 @@ class PluginController extends Controller
         \Log::channel('plugin')->{$level}($message, $context);
     }
 
+    /**
+     * GET /api/popup-registry — public endpoint (no auth required).
+     * Returns the popup registry built from all enabled plugin manifests.
+     * Used by the frontend for popup detection and by external tooling.
+     */
+    public function popupRegistry(): JsonResponse
+    {
+        return response()->json(['popups' => Plugin::buildPopupRegistry()]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $plugins = Plugin::all()->map(function (Plugin $p) {

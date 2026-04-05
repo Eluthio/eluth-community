@@ -899,7 +899,7 @@ async function loadMessages(channelId) {
     messages.value = data.messages
 }
 
-async function loadPlugins() {
+async function loadPlugins(options = {}) {
     try {
         const data = await get('/plugins')
         const storageUrl = getConfig().storageUrl ?? (window.location.origin + '/storage')
@@ -931,6 +931,10 @@ async function loadPlugins() {
         pluginSettings.value = settings
 
         // Let each loaded plugin bootstrap itself (fetch data, register renderers, etc.)
+        // NOTE: bootstrapPlugins() must never be called in popup contexts — plugins
+        // must not run leader election (Web Locks) or heavy init in popups.
+        // loadPlugins() is only called from the main-window path; callers that need
+        // scripts without bootstrap use loadPlugins({ skipBootstrap: true }).
         const apiBase = '/api'
         const upload = async (path, formData) => {
             const token = localStorage.getItem('eluth_token') ?? ''
@@ -945,7 +949,9 @@ async function loadPlugins() {
             }
             return res.json()
         }
-        await bootstrapPlugins({ get, post, apiBase, upload, authToken: localStorage.getItem('eluth_token') ?? '' })
+        if (! options.skipBootstrap) {
+            await bootstrapPlugins({ get, post, apiBase, upload, authToken: localStorage.getItem('eluth_token') ?? '' })
+        }
     } catch { /* non-critical */ }
 }
 
@@ -1123,7 +1129,10 @@ onMounted(async () => {
                 authToken.value     = stored
                 authenticated.value = true
 
-                // Plugin popup short-circuit: skip full app init for GM/player/participants windows
+                // Plugin popup short-circuit: skip full app init for popup windows.
+                // Load plugin scripts so popup components are available, but do NOT
+                // call bootstrap() — plugins must not run leader election (Web Locks)
+                // or any heavy init in popup contexts.
                 const _popupParams = new URLSearchParams(window.location.search)
                 if (_popupParams.has('rpg_gm') || _popupParams.has('rpg_player') || _popupParams.has('participants_join')) {
                     if (_popupParams.has('participants_join')) {
@@ -1131,7 +1140,7 @@ onMounted(async () => {
                             roomId: _popupParams.get('room_id') ?? '',
                         }
                     }
-                    await loadPlugins()
+                    await loadPlugins({ skipBootstrap: true })
                     return
                 }
 
