@@ -118,6 +118,15 @@ return [
             'replace_placeholders' => true,
         ],
 
+        // Plugin lifecycle channel — always writes at debug level, independent of LOG_LEVEL.
+        // Captures install/enable/disable/uninstall progress, migration steps, and verification.
+        'plugin' => [
+            'driver' => 'single',
+            'path'   => storage_path('logs/plugin.log'),
+            'level'  => 'debug',
+            'replace_placeholders' => true,
+        ],
+
         'null' => [
             'driver' => 'monolog',
             'handler' => NullHandler::class,
