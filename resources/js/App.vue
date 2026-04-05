@@ -1,12 +1,4 @@
 <template>
-    <ParticipantWindow
-        v-if="participantJoinParams && authenticated"
-        :room-id="participantJoinParams.roomId"
-        :auth-token="authToken"
-        :api-base="communityApiBase"
-        :current-member="currentMemberProxy"
-        @close="participantJoinParams = null"
-    />
     <div v-show="!isPluginPopup">
         <VideoBackground v-if="theme.backgroundType === 'video'" :src="theme.backgroundValue" />
 
@@ -299,7 +291,6 @@ import { loadClientConfig, getConfig } from './clientConfig.js'
 import { loadPlugin, bootstrapPlugins, getPlugin } from './plugins/registry.js'
 import { useApi, ApiError } from './composables/useApi.js'
 import VideoBackground    from './components/VideoBackground.vue'
-import ParticipantWindow  from './components/ParticipantWindow.vue'
 import ChannelSidebar     from './components/ChannelSidebar.vue'
 import MessagePane     from './components/MessagePane.vue'
 import MemberSidebar   from './components/MemberSidebar.vue'
@@ -314,12 +305,12 @@ import { createCentralEcho } from './centralEcho.js'
 
 const { get, post } = useApi()
 
-// True when this window was opened as a plugin popup (e.g. GM console, player window)
+// True when this window was opened as a legacy RPG plugin popup.
+// Once the RPG plugin is migrated to the popup registry (Track 2), this will be removed.
 const _qs = new URLSearchParams(window.location.search)
-const isPluginPopup = _qs.has('rpg_gm') || _qs.has('rpg_player') || _qs.has('participants_join')
+const isPluginPopup = _qs.has('rpg_gm') || _qs.has('rpg_player')
 
-const participantJoinParams = ref(null)
-const communityApiBase      = window.location.origin + '/api'
+const communityApiBase = window.location.origin + '/api'
 
 const centralUrl = ref('')
 
@@ -1129,17 +1120,11 @@ onMounted(async () => {
                 authToken.value     = stored
                 authenticated.value = true
 
-                // Plugin popup short-circuit: skip full app init for popup windows.
-                // Load plugin scripts so popup components are available, but do NOT
-                // call bootstrap() — plugins must not run leader election (Web Locks)
-                // or any heavy init in popup contexts.
+                // Legacy RPG plugin popup short-circuit — loads plugin scripts without
+                // calling bootstrap() so RPG components are available.
+                // Remove once the RPG plugin is migrated to the popup registry.
                 const _popupParams = new URLSearchParams(window.location.search)
-                if (_popupParams.has('rpg_gm') || _popupParams.has('rpg_player') || _popupParams.has('participants_join')) {
-                    if (_popupParams.has('participants_join')) {
-                        participantJoinParams.value = {
-                            roomId: _popupParams.get('room_id') ?? '',
-                        }
-                    }
+                if (_popupParams.has('rpg_gm') || _popupParams.has('rpg_player')) {
                     await loadPlugins({ skipBootstrap: true })
                     return
                 }
